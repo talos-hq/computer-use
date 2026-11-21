@@ -1,0 +1,19 @@
+{
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Session 'demo' is active."
+      }
+    ],
+    "structuredContent": {
+      "session": "demo",
+      "capture_scope": "auto",
+      "effective_scope": "window",
+      "desktop_capture_authorized": false,
+      "desktop_unlocked": false,
+      "active": true,
+      "revived": false
+    }
+  }
+}

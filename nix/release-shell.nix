@@ -26,6 +26,7 @@ let
   '';
 in pkgs.mkShell {
   nativeBuildInputs = [ pkgs.pkg-config pkgs.binutils pkgs.patchelf ];
+  CLANG_PATH = "${pkgs.llvmPackages.clang-unwrapped}/bin/clang";
   LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
   buildInputs = [ headerMetadata ];
   shellHook = ''

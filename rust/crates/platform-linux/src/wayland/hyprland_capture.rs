@@ -238,13 +238,8 @@ pub(super) fn dispatch_until<S: 'static>(
 
 /// Anonymous shared-memory file of `len` bytes (memfd, CLOEXEC).
 fn create_shm_file(len: u64) -> Result<File> {
-    use std::os::fd::FromRawFd;
-    let name = std::ffi::CString::new("cua-driver-capture").unwrap();
-    let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
-    if fd < 0 {
-        return Err(std::io::Error::last_os_error()).context("memfd_create failed");
-    }
-    let file = unsafe { File::from_raw_fd(fd) };
+    let file =
+        File::from(super::create_memfd(c"cua-driver-capture").context("memfd_create failed")?);
     file.set_len(len).context("ftruncate on memfd failed")?;
     Ok(file)
 }

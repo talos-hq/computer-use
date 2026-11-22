@@ -381,7 +381,7 @@ jobs:
       - name: Run Linux unit tests
         working-directory: rust
         timeout-minutes: 20
-        run: soldr cargo test --locked -p cua-driver -p platform-linux
+        run: soldr cargo test --no-fail-fast --locked -p cua-driver -p platform-linux
 
   test-windows:
     needs: [source, windows-sign]

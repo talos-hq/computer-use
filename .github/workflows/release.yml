@@ -126,6 +126,8 @@ jobs:
         working-directory: rust
         env:
           TARGET: ${{ matrix.arch }}-pc-windows-msvc
+          # soldr's encoded cross-linker flags override target flags from Cargo config.
+          RUSTFLAGS: -C target-feature=+crt-static
         run: |
           soldr build --target "$TARGET" --release --locked -p cua-driver --bin computer-use
           exe="target/$TARGET/release/computer-use.exe"
@@ -135,6 +137,11 @@ jobs:
           esac
           llvm-readobj --file-headers "$exe" | grep -F "$machine"
           llvm-readobj --coff-resources "$exe" | grep -E 'MANIFEST.*(ID|Type ID).*24'
+          imports=$(llvm-readobj --coff-imports "$exe")
+          if grep -Ei 'Name: (vcruntime|msvcp|ucrtbase|msvcrt|api-ms-win-crt).*\.dll' <<< "$imports"; then
+            echo 'Release imports a dynamic C runtime' >&2
+            exit 1
+          fi
           install -D "$exe" ../unsigned/computer-use.exe
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

@@ -238,7 +238,7 @@ fn set_inheritable(file: &std::fs::File, inheritable: bool) -> bool {
 #[cfg(not(target_os = "macos"))]
 pub fn reexec_disclaimed_if_needed(_socket_lock: Option<&std::fs::File>) {}
 
-/// The startup warning for a daemon running outside CuaDriver.app, or `None`
+/// The startup warning for a daemon running outside ComputerUse.app, or `None`
 /// when it is embedded or bundled (CUA-1777).
 #[cfg(target_os = "macos")]
 fn unbundled_warning(embedded: bool, inside_bundle: bool) -> Option<&'static str> {
@@ -246,7 +246,7 @@ fn unbundled_warning(embedded: bool, inside_bundle: bool) -> Option<&'static str
         return None;
     }
     Some(
-        "warning: running unbundled (outside CuaDriver.app). The daemon is its own responsible \
+        "warning: running unbundled (outside ComputerUse.app). The daemon is its own responsible \
          process, so macOS gives it no valid WindowServer connection: background (no-raise) \
          focus steps fail with status 1002 and background actions will be refused. Run the \
          app-bundle daemon instead: `cua-driver permissions grant`.",

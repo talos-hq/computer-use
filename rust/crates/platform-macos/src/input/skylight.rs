@@ -386,7 +386,7 @@ type GetConnectionPSNFn = unsafe extern "C" fn(u32, *mut c_void) -> i32;
 
 /// `SLPSPostEventRecordTo` result for "invalid connection". The daemon gets it
 /// when it runs as its own responsible process (a bare binary outside
-/// CuaDriver.app, which relaunches itself disclaimed): the process has no
+/// ComputerUse.app, which relaunches itself disclaimed): the process has no
 /// usable WindowServer connection for the target, so every no-raise focus
 /// record is dropped.
 pub const WINDOWSERVER_INVALID_CONNECTION: i32 = 1002;

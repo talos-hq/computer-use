@@ -183,7 +183,7 @@ fn key_names_app(key: &str, bundle: &Path, bundle_id: Option<&str>) -> bool {
     bundle_id.is_some_and(|id| !id.is_empty() && key == id) || key_names_bundle(key, bundle)
 }
 
-/// Whether an approvals key (`file:///…/CuaDriver.app/`) names `bundle`.
+/// Whether an approvals key (`file:///…/ComputerUse.app/`) names `bundle`.
 fn key_names_bundle(key: &str, bundle: &Path) -> bool {
     let Some(path) = key.strip_prefix("file://") else {
         return false;
@@ -247,9 +247,9 @@ mod tests {
     fn app_bundle_is_found_only_for_bundled_executables() {
         assert_eq!(
             app_bundle_of(Path::new(
-                "/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
+                "/Applications/ComputerUse.app/Contents/MacOS/computer-use"
             )),
-            Some(PathBuf::from("/Applications/CuaDriver.app"))
+            Some(PathBuf::from("/Applications/ComputerUse.app"))
         );
         assert_eq!(app_bundle_of(Path::new("/usr/local/bin/cua-driver")), None);
         assert_eq!(
@@ -260,17 +260,17 @@ mod tests {
 
     #[test]
     fn approval_key_matches_the_bundle_url() {
-        let bundle = Path::new("/Users/lume/My Apps/CuaDriver.app");
+        let bundle = Path::new("/Users/lume/My Apps/ComputerUse.app");
         assert!(key_names_bundle(
-            "file:///Users/lume/My%20Apps/CuaDriver.app/",
+            "file:///Users/lume/My%20Apps/ComputerUse.app/",
             bundle
         ));
         assert!(!key_names_bundle(
-            "file:///Users/lume/Other/CuaDriver.app/",
+            "file:///Users/lume/Other/ComputerUse.app/",
             bundle
         ));
         assert!(!key_names_bundle(
-            "/Users/lume/My Apps/CuaDriver.app",
+            "/Users/lume/My Apps/ComputerUse.app",
             bundle
         ));
     }
@@ -300,8 +300,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cua-consent-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("ScreenCaptureApprovals.plist");
-        let bundle = Path::new("/Applications/CuaDriver.app");
-        let id = Some("com.trycua.driver");
+        let bundle = Path::new("/Applications/ComputerUse.app");
+        let id = Some("com.taloshq.computer-use");
 
         let _ = std::fs::remove_file(&file);
         assert_eq!(
@@ -315,7 +315,7 @@ mod tests {
             ConsentState::Missing
         );
 
-        write_plist(&file, &["com.trycua.driver"]);
+        write_plist(&file, &["com.taloshq.computer-use"]);
         assert_eq!(
             consent_state(&file, bundle, id, None),
             ConsentState::Recorded
@@ -333,7 +333,7 @@ mod tests {
             &file,
             &[
                 "file:///Applications/Other.app/",
-                "file:///Applications/CuaDriver.app/",
+                "file:///Applications/ComputerUse.app/",
             ],
         );
         assert_eq!(
@@ -353,9 +353,9 @@ mod tests {
     fn a_verified_grant_counts_as_consent_without_an_approvals_entry() {
         let home = tempfile::tempdir().expect("tempdir");
         let file = home.path().join("ScreenCaptureApprovals.plist");
-        let bundle = Path::new("/Applications/CuaDriver.app");
-        let id = Some("com.trycua.driver");
-        let release = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver";
+        let bundle = Path::new("/Applications/ComputerUse.app");
+        let id = Some("com.taloshq.computer-use");
+        let release = "/Applications/ComputerUse.app/Contents/MacOS/computer-use";
         let evidence_for = |executable: &str, attribution: Option<&str>| {
             crate::tools::consent_evidence_store_for_identity(
                 executable,

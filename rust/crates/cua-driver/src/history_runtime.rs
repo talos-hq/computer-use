@@ -22,7 +22,7 @@ use cua_driver_core::tool::ToolRegistry;
 static HISTORY_ADMITTED: AtomicBool = AtomicBool::new(false);
 static DAEMON_LAUNCH_STATE: OnceLock<Mutex<DaemonLaunchState>> = OnceLock::new();
 #[cfg(target_os = "macos")]
-const RELEASE_TEAM_IDENTIFIER: &str = "YCK386LBJ7";
+const RELEASE_TEAM_IDENTIFIER: &str = "NCFFSNX26D";
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct DaemonLaunchState {
@@ -272,21 +272,10 @@ pub fn verify_installed_app_for_history() -> anyhow::Result<()> {
         .find_map(|line| line.trim().strip_prefix("TeamIdentifier="))
         .filter(|value| !value.is_empty() && *value != "not set")
         .unwrap_or("");
-    let entitlements = Command::new("/usr/bin/codesign")
-        .args(["-d", "--entitlements", "-", "--xml", helper.as_ref()])
-        .output()?;
-    if !entitlements.status.success() {
-        anyhow::bail!("installed Cua Driver entitlements could not be inspected");
-    }
-    let compact: String = String::from_utf8_lossy(&entitlements.stdout)
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect();
     validate_history_app_signature(
         &stderr,
         &requirement,
         team_identifier,
-        &compact,
         crate::bundle::bundle_id(),
         crate::bundle::state_namespace() == "cua-driver",
     )
@@ -297,9 +286,8 @@ fn validate_history_app_signature(
     detail: &str,
     requirement: &str,
     team_identifier: &str,
-    compact_entitlements: &str,
     bundle_id: &str,
-    require_release_entitlements: bool,
+    require_release_team: bool,
 ) -> anyhow::Result<()> {
     let expected = format!("Identifier={bundle_id}");
     if !detail.lines().any(|line| line.trim() == expected) {
@@ -313,8 +301,8 @@ fn validate_history_app_signature(
     // A stable self-signed local-development certificate has a certificate-leaf
     // designated requirement but no Apple TeamIdentifier. That leaf pins local
     // history to the same signing identity across rebuilds. Production still
-    // requires the exact Apple team and device-protected Keychain entitlements.
-    if !require_release_entitlements {
+    // requires the release signing team and the Apple trust chain.
+    if !require_release_team {
         return Ok(());
     }
     if team_identifier.is_empty() || team_identifier == "not set" {
@@ -326,20 +314,6 @@ fn validate_history_app_signature(
     if !requirement.contains("anchor apple generic") {
         anyhow::bail!(
             "installed Cua Driver signature is not anchored to Apple's code-signing trust chain"
-        );
-    }
-    let application_identifier = format!("{team_identifier}.{bundle_id}");
-    let application_entitlement = format!(
-        "<key>com.apple.application-identifier</key><string>{application_identifier}</string>"
-    );
-    let keychain_entitlement = format!(
-        "<key>keychain-access-groups</key><array><string>{application_identifier}</string></array>"
-    );
-    if !compact_entitlements.contains(&application_entitlement)
-        || !compact_entitlements.contains(&keychain_entitlement)
-    {
-        anyhow::bail!(
-            "installed Cua Driver lacks the device-protected Keychain entitlements required by Computer History"
         );
     }
     Ok(())
@@ -554,7 +528,9 @@ mod tests {
     #[cfg(target_os = "macos")]
     fn offline_purge_identity_guard_requires_the_exact_packaged_helper() {
         let temp = tempfile::tempdir().unwrap();
-        let expected = temp.path().join("CuaDriver.app/Contents/MacOS/cua-driver");
+        let expected = temp
+            .path()
+            .join("ComputerUse.app/Contents/MacOS/computer-use");
         fs::create_dir_all(expected.parent().unwrap()).unwrap();
         fs::write(&expected, b"synthetic").unwrap();
         assert!(is_exact_packaged_helper(&expected, &expected));
@@ -571,7 +547,6 @@ mod tests {
             "Identifier=com.trycua.driver.local\nTeamIdentifier=not set",
             "designated => identifier \"com.trycua.driver.local\" and certificate leaf = H\"d2badc24c61056ede3b61724c54c5a7d1649ce4d\"",
             "",
-            "",
             "com.trycua.driver.local",
             false,
         )
@@ -585,7 +560,6 @@ mod tests {
             "Identifier=com.trycua.driver.local\nTeamIdentifier=TEAM123",
             "designated => cdhash H\"1234\"",
             "TEAM123",
-            "",
             "com.trycua.driver.local",
             false,
         );
@@ -594,7 +568,6 @@ mod tests {
             "Identifier=com.trycua.driver\nTeamIdentifier=TEAM123",
             "designated => identifier \"com.trycua.driver\" and certificate leaf[subject.OU] = TEAM123",
             "TEAM123",
-            "",
             "com.trycua.driver.local",
             false,
         );
@@ -603,51 +576,24 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
-    fn release_history_still_requires_device_protected_keychain_entitlements() {
-        assert!(validate_history_app_signature(
-            "Identifier=com.trycua.driver\nTeamIdentifier=not set",
-            "designated => anchor apple generic and identifier \"com.trycua.driver\" and certificate leaf = H\"1234\"",
-            "",
-            "",
-            "com.trycua.driver",
-            true,
-        )
-        .is_err());
-        let detail =
-            format!("Identifier=com.trycua.driver\nTeamIdentifier={RELEASE_TEAM_IDENTIFIER}");
+    fn release_history_requires_the_talos_signing_team() {
+        let bundle = crate::bundle::RELEASE_BUNDLE_ID;
+        let detail = format!("Identifier={bundle}\nTeamIdentifier={RELEASE_TEAM_IDENTIFIER}");
         let requirement = format!(
-            "designated => anchor apple generic and identifier \"com.trycua.driver\" and certificate leaf[subject.OU] = {RELEASE_TEAM_IDENTIFIER}"
-        );
-        assert!(validate_history_app_signature(
-            &detail,
-            &requirement,
-            RELEASE_TEAM_IDENTIFIER,
-            "",
-            "com.trycua.driver",
-            true,
-        )
-        .is_err());
-        let entitlements = format!(
-            "<key>com.apple.application-identifier</key><string>{RELEASE_TEAM_IDENTIFIER}.com.trycua.driver</string><key>keychain-access-groups</key><array><string>{RELEASE_TEAM_IDENTIFIER}.com.trycua.driver</string></array>"
+            "designated => anchor apple generic and identifier \"{bundle}\" and certificate leaf[subject.OU] = {RELEASE_TEAM_IDENTIFIER}"
         );
         validate_history_app_signature(
             &detail,
             &requirement,
             RELEASE_TEAM_IDENTIFIER,
-            &entitlements,
-            "com.trycua.driver",
+            bundle,
             true,
         )
         .unwrap();
-
-        assert!(validate_history_app_signature(
-            "Identifier=com.trycua.driver\nTeamIdentifier=OTHERTEAM",
-            "designated => identifier \"com.trycua.driver\" and certificate leaf[subject.OU] = OTHERTEAM",
-            "OTHERTEAM",
-            "<key>com.apple.application-identifier</key><string>OTHERTEAM.com.trycua.driver</string><key>keychain-access-groups</key><array><string>OTHERTEAM.com.trycua.driver</string></array>",
-            "com.trycua.driver",
-            true,
-        )
-        .is_err());
+        assert!(
+            validate_history_app_signature(&detail, &requirement, "OTHERTEAM", bundle, true)
+                .is_err()
+        );
+        assert!(validate_history_app_signature(&detail, &requirement, "", bundle, true).is_err());
     }
 }

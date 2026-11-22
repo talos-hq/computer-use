@@ -1517,18 +1517,18 @@ mod tests {
 
     #[test]
     fn installed_app_running_as_accessory_reports_live_state() {
-        // The #3060 shape: CuaDriver.app ships LSUIElement=true, so its live
+        // The #3060 shape: ComputerUse.app ships LSUIElement=true, so its live
         // process runs as Accessory and never enters the Regular list.
-        let mut entry = app("Cua Driver", 0, Some("com.trycua.driver"), false);
-        entry.launch_path = Some("/Applications/CuaDriver.app".to_owned());
+        let mut entry = app("Cua Driver", 0, Some("com.taloshq.computer-use"), false);
+        entry.launch_path = Some("/Applications/ComputerUse.app".to_owned());
         let merged = merge_app_lists(
             vec![],
             vec![entry],
             &states(&[(
-                "com.trycua.driver",
+                "com.taloshq.computer-use",
                 31438,
                 false,
-                Some("/Applications/CuaDriver.app"),
+                Some("/Applications/ComputerUse.app"),
             )]),
         );
         assert_eq!(merged.len(), 1);
@@ -1537,7 +1537,7 @@ mod tests {
         // The upgrade must not clobber the fields the installed scan owns.
         assert_eq!(
             merged[0].launch_path.as_deref(),
-            Some("/Applications/CuaDriver.app")
+            Some("/Applications/ComputerUse.app")
         );
     }
 
@@ -1594,19 +1594,19 @@ mod tests {
 
     #[test]
     fn duplicate_bundle_ids_upgrade_only_the_live_bundle_path() {
-        let mut release = app("Cua Driver", 0, Some("com.trycua.driver"), false);
-        release.launch_path = Some("/Applications/CuaDriver.app".to_owned());
-        let mut debug = app("Cua Driver", 0, Some("com.trycua.driver"), false);
-        debug.launch_path = Some("/Users/test/CuaDriver.app".to_owned());
+        let mut release = app("Cua Driver", 0, Some("com.taloshq.computer-use"), false);
+        release.launch_path = Some("/Applications/ComputerUse.app".to_owned());
+        let mut debug = app("Cua Driver", 0, Some("com.taloshq.computer-use"), false);
+        debug.launch_path = Some("/Users/test/ComputerUse.app".to_owned());
 
         let merged = merge_app_lists(
             vec![],
             vec![release, debug],
             &states(&[(
-                "com.trycua.driver",
+                "com.taloshq.computer-use",
                 42,
                 false,
-                Some("/Users/test/CuaDriver.app"),
+                Some("/Users/test/ComputerUse.app"),
             )]),
         );
 

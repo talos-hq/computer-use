@@ -3,7 +3,7 @@
 
 //! Other copies of Cua Driver.app that macOS knows about.
 //!
-//! A Mac can hold several copies of `CuaDriver.app`: an old release in
+//! A Mac can hold several copies of `ComputerUse.app`: an old release in
 //! `~/Downloads`, one in the Trash, a benchmark folder. macOS resolves a bundle
 //! id, an `open -a CuaDriver` and a System Settings permission row to *one* of
 //! the registered copies, not necessarily the installed one. That is how a
@@ -103,7 +103,7 @@ pub fn parse_lsregister_dump(dump: &str, bundle_id: &str) -> Vec<PathBuf> {
     found
 }
 
-/// `/Applications/CuaDriver.app (0x10268)` -> `/Applications/CuaDriver.app`.
+/// `/Applications/ComputerUse.app (0x10268)` -> `/Applications/ComputerUse.app`.
 fn strip_record_id(text: &str) -> String {
     match text.rfind(" (0x") {
         Some(index) if text.ends_with(')') => text[..index].to_owned(),
@@ -354,7 +354,7 @@ pub fn read_tcc_rows(home: &Path, run: Run) -> Result<Vec<TccRow>, String> {
     let db = home.join("Library/Application Support/com.apple.TCC/TCC.db");
     let db_text = db.to_string_lossy().into_owned();
     let sql = "SELECT service, client, client_type FROM access \
-               WHERE client = 'com.trycua.driver' OR client LIKE '%cua-driver%' \
+               WHERE client = 'com.taloshq.computer-use' OR client LIKE '%cua-driver%' \
                OR client LIKE '%CuaDriver%';";
     let out =
         run(SQLITE3, &["-separator", "|", &db_text, sql], QUICK_TIMEOUT).ok_or_else(|| {
@@ -391,7 +391,7 @@ fn service_name(service: &str) -> &str {
 const REMOVE_ROWS_HELP: &str = "To remove one stale row: System Settings > Privacy & Security > \
 Accessibility (and Screen & System Audio Recording), select the extra Cua Driver entry and click \
 the minus button.\nTo clear every Cua Driver row and start over: `tccutil reset Accessibility \
-com.trycua.driver`, `tccutil reset ScreenCapture com.trycua.driver`, then \
+com.taloshq.computer-use`, `tccutil reset ScreenCapture com.taloshq.computer-use`, then \
 `cua-driver permissions grant`.";
 
 /// The doctor probe for permission rows tied to a different path or version.
@@ -502,37 +502,37 @@ mod tests {
     const DUMP: &str = "\
 --------------------------------------------------------------------------------
 bundle id:                  Cua Driver (0xf0ac)
-path:                       /Applications/CuaDriver.app (0x10268)
+path:                       /Applications/ComputerUse.app (0x10268)
 name:                       Cua Driver
-identifier:                 com.trycua.driver
+identifier:                 com.taloshq.computer-use
 version:                    0.36 ({length = 32, bytes = 0x00})
 infoDictionary:             14 values (144140 (0x2330c))
                             {
-                                CFBundleIdentifier = \"com.trycua.driver\";
+                                CFBundleIdentifier = \"com.taloshq.computer-use\";
                             }
 --------------------------------------------------------------------------------
 bundle id:                  CuaDriver-0.34.0 (0x1)
-path:                       /Users/me/.Trash/Old Apps/CuaDriver.app (0x2)
-identifier:                 com.trycua.driver
+path:                       /Users/me/.Trash/Old Apps/ComputerUse.app (0x2)
+identifier:                 com.taloshq.computer-use
 --------------------------------------------------------------------------------
 bundle id:                  Cua Driver Local (0x3)
 path:                       /Applications/CuaDriverLocal.app (0x4)
 identifier:                 com.trycua.driver.local
 --------------------------------------------------------------------------------
 bundle id:                  Other (0x5)
-path:                       /tmp/bench/CuaDriver.app (0x6)
-identifier:                 com.trycua.driver
+path:                       /tmp/bench/ComputerUse.app (0x6)
+identifier:                 com.taloshq.computer-use
 --------------------------------------------------------------------------------
 ";
 
     #[test]
     fn dump_parser_returns_every_bundle_with_the_exact_identifier() {
         assert_eq!(
-            parse_lsregister_dump(DUMP, "com.trycua.driver"),
+            parse_lsregister_dump(DUMP, "com.taloshq.computer-use"),
             [
-                PathBuf::from("/Applications/CuaDriver.app"),
-                PathBuf::from("/Users/me/.Trash/Old Apps/CuaDriver.app"),
-                PathBuf::from("/tmp/bench/CuaDriver.app"),
+                PathBuf::from("/Applications/ComputerUse.app"),
+                PathBuf::from("/Users/me/.Trash/Old Apps/ComputerUse.app"),
+                PathBuf::from("/tmp/bench/ComputerUse.app"),
             ],
             "the local product (com.trycua.driver.local) must not match, \
              and a path with spaces and its (0x..) record id parse cleanly"
@@ -546,9 +546,9 @@ identifier:                 com.trycua.driver
     #[test]
     fn a_second_bundle_at_another_path_is_found_and_the_installed_one_is_not() {
         let root = tempfile::tempdir().unwrap();
-        let active = root.path().join("Applications/CuaDriver.app");
-        let old = root.path().join("Downloads/CuaDriver.app");
-        let gone = root.path().join(".Trash/CuaDriver.app");
+        let active = root.path().join("Applications/ComputerUse.app");
+        let old = root.path().join("Downloads/ComputerUse.app");
+        let gone = root.path().join(".Trash/ComputerUse.app");
         std::fs::create_dir_all(&active).unwrap();
         std::fs::create_dir_all(&old).unwrap();
         let alias = root.path().join("alias.app");
@@ -588,15 +588,15 @@ identifier:                 com.trycua.driver
     #[test]
     fn discover_merges_launchservices_and_spotlight_and_reads_versions() {
         let root = tempfile::tempdir().unwrap();
-        let active = root.path().join("Applications/CuaDriver.app");
-        let old = root.path().join("tmp/CuaDriver.app");
-        let indexed = root.path().join("images/CuaDriver.app");
+        let active = root.path().join("Applications/ComputerUse.app");
+        let old = root.path().join("tmp/ComputerUse.app");
+        let indexed = root.path().join("images/ComputerUse.app");
         for dir in [&active, &old, &indexed] {
             std::fs::create_dir_all(dir).unwrap();
         }
         let dump = format!(
-            "{sep}\npath:   {} (0x1)\nidentifier:   com.trycua.driver\n\
-             {sep}\npath:   {} (0x2)\nidentifier:   com.trycua.driver\n",
+            "{sep}\npath:   {} (0x1)\nidentifier:   com.taloshq.computer-use\n\
+             {sep}\npath:   {} (0x2)\nidentifier:   com.taloshq.computer-use\n",
             active.display(),
             old.display(),
             sep = "-".repeat(40)
@@ -611,7 +611,7 @@ identifier:                 com.trycua.driver
             }
         };
 
-        let copies = discover(&active, "com.trycua.driver", &run);
+        let copies = discover(&active, "com.taloshq.computer-use", &run);
 
         let paths: Vec<_> = copies.iter().map(|c| c.path.clone()).collect();
         assert_eq!(paths, [indexed.clone(), old.clone()]);
@@ -627,15 +627,15 @@ identifier:                 com.trycua.driver
     #[test]
     fn without_a_launchservices_dump_spotlight_hits_count_as_registered() {
         let root = tempfile::tempdir().unwrap();
-        let active = root.path().join("Applications/CuaDriver.app");
-        let found = root.path().join("tmp/CuaDriver.app");
+        let active = root.path().join("Applications/ComputerUse.app");
+        let found = root.path().join("tmp/ComputerUse.app");
         std::fs::create_dir_all(&found).unwrap();
         let spotlight = format!("{}\n", found.display());
         let run = move |program: &str, _: &[&str], _: Duration| -> Option<String> {
             (program == MDFIND).then(|| spotlight.clone())
         };
 
-        let copies = discover(&active, "com.trycua.driver", &run);
+        let copies = discover(&active, "com.taloshq.computer-use", &run);
 
         assert_eq!(copies.len(), 1);
         assert!(copies[0].registered, "cannot prove it is unregistered");
@@ -643,16 +643,16 @@ identifier:                 com.trycua.driver
 
     #[test]
     fn copies_only_spotlight_lists_do_not_raise_a_warning() {
-        let active = Path::new("/Applications/CuaDriver.app");
-        let indexed = [copy("/Users/me/Downloads/CuaDriver.app", Some("0.34.0"))];
+        let active = Path::new("/Applications/ComputerUse.app");
+        let indexed = [copy("/Users/me/Downloads/ComputerUse.app", Some("0.34.0"))];
 
         let probe = duplicate_probe(active, "CuaDriver", &[], &indexed, None);
 
         assert_eq!(probe.status, Status::Ok);
-        assert!(probe.message.contains("only /Applications/CuaDriver.app"));
+        assert!(probe.message.contains("only /Applications/ComputerUse.app"));
         let detail = probe.detail.unwrap();
         assert!(detail.contains("Spotlight also lists 1 copy on disk that macOS does not launch"));
-        assert!(detail.contains("Downloads/CuaDriver.app (version 0.34.0)"));
+        assert!(detail.contains("Downloads/ComputerUse.app (version 0.34.0)"));
     }
 
     #[test]
@@ -662,17 +662,17 @@ identifier:                 com.trycua.driver
             let mut call = vec![program.to_owned()];
             call.extend(args.iter().map(|a| (*a).to_owned()));
             calls.borrow_mut().push(call);
-            (args.last() != Some(&"/bad/CuaDriver.app")).then(String::new)
+            (args.last() != Some(&"/bad/ComputerUse.app")).then(String::new)
         };
         let copies = [
             AppCopy {
-                path: "/good/CuaDriver.app".into(),
+                path: "/good/ComputerUse.app".into(),
                 version: None,
                 exists: true,
                 registered: true,
             },
             AppCopy {
-                path: "/bad/CuaDriver.app".into(),
+                path: "/bad/ComputerUse.app".into(),
                 version: None,
                 exists: true,
                 registered: true,
@@ -685,7 +685,7 @@ identifier:                 com.trycua.driver
         assert!(outcomes[1].result.is_err());
         assert_eq!(
             calls.borrow()[0],
-            [LSREGISTER, "-u", "/good/CuaDriver.app"],
+            [LSREGISTER, "-u", "/good/ComputerUse.app"],
             "only registration is removed; nothing deletes a file"
         );
     }
@@ -701,10 +701,10 @@ identifier:                 com.trycua.driver
 
     #[test]
     fn doctor_warns_about_duplicate_copies_and_points_at_fix() {
-        let active = Path::new("/Applications/CuaDriver.app");
+        let active = Path::new("/Applications/ComputerUse.app");
         let copies = [
-            copy("/Users/me/.Trash/CuaDriver.app", Some("0.34.0")),
-            copy("/tmp/CuaDriver.app", Some("0.36.0")),
+            copy("/Users/me/.Trash/ComputerUse.app", Some("0.34.0")),
+            copy("/tmp/ComputerUse.app", Some("0.36.0")),
         ];
 
         let probe = duplicate_probe(active, "CuaDriver", &copies, &[], None);
@@ -712,7 +712,7 @@ identifier:                 com.trycua.driver
         assert_eq!(probe.status, Status::Warn);
         assert!(probe.message.contains("2 other copies of CuaDriver"));
         let detail = probe.detail.unwrap();
-        assert!(detail.contains("/Users/me/.Trash/CuaDriver.app (version 0.34.0)"));
+        assert!(detail.contains("/Users/me/.Trash/ComputerUse.app (version 0.34.0)"));
         assert!(detail.contains("cua-driver doctor --fix"));
         assert!(detail.contains("No files are deleted"));
     }
@@ -720,7 +720,7 @@ identifier:                 com.trycua.driver
     #[test]
     fn doctor_is_quiet_when_only_the_installed_copy_is_registered() {
         let probe = duplicate_probe(
-            Path::new("/Applications/CuaDriver.app"),
+            Path::new("/Applications/ComputerUse.app"),
             "CuaDriver",
             &[],
             &[],
@@ -728,14 +728,14 @@ identifier:                 com.trycua.driver
         );
 
         assert_eq!(probe.status, Status::Ok);
-        assert!(probe.message.contains("only /Applications/CuaDriver.app"));
+        assert!(probe.message.contains("only /Applications/ComputerUse.app"));
     }
 
     #[test]
     fn fix_reports_what_it_unregistered_and_what_macos_still_knows() {
-        let active = Path::new("/Applications/CuaDriver.app");
-        let a = copy("/tmp/a/CuaDriver.app", Some("0.34.0"));
-        let b = copy("/tmp/b/CuaDriver.app", None);
+        let active = Path::new("/Applications/ComputerUse.app");
+        let a = copy("/tmp/a/ComputerUse.app", Some("0.34.0"));
+        let b = copy("/tmp/b/ComputerUse.app", None);
         let outcomes = [
             FixOutcome {
                 copy: a.clone(),
@@ -756,7 +756,7 @@ identifier:                 com.trycua.driver
         );
         assert_eq!(clean.status, Status::Ok);
         assert!(clean.message.contains(
-            "unregistered 2 other copies; macOS will now only use /Applications/CuaDriver.app"
+            "unregistered 2 other copies; macOS will now only use /Applications/ComputerUse.app"
         ));
         assert!(clean.detail.unwrap().contains("No files were deleted"));
 
@@ -782,16 +782,16 @@ identifier:                 com.trycua.driver
 
     #[test]
     fn permission_rows_tied_to_another_path_are_flagged_with_removal_steps() {
-        let active = Path::new("/Applications/CuaDriver.app/Contents/MacOS/cua-driver");
+        let active = Path::new("/Applications/ComputerUse.app/Contents/MacOS/computer-use");
         let rows = Ok(parse_tcc_rows(
-            "kTCCServiceAccessibility|com.trycua.driver|0\n\
-             kTCCServiceAccessibility|/Applications/CuaDriver.app/Contents/MacOS/cua-driver|1\n\
-             kTCCServiceScreenCapture|/Users/me/Downloads/CuaDriver.app/Contents/MacOS/cua-driver|1\n",
+            "kTCCServiceAccessibility|com.taloshq.computer-use|0\n\
+             kTCCServiceAccessibility|/Applications/ComputerUse.app/Contents/MacOS/computer-use|1\n\
+             kTCCServiceScreenCapture|/Users/me/Downloads/ComputerUse.app/Contents/MacOS/computer-use|1\n",
         ));
 
         let probe = permission_row_probe(active, rows, |bundle| {
             bundle
-                .ends_with("Downloads/CuaDriver.app")
+                .ends_with("Downloads/ComputerUse.app")
                 .then(|| "0.34.0".to_owned())
         });
 
@@ -801,19 +801,19 @@ identifier:                 com.trycua.driver
             .starts_with("1 permission row belongs to a different"));
         let detail = probe.detail.unwrap();
         assert!(detail.contains(
-            "- Screen Recording: /Users/me/Downloads/CuaDriver.app/Contents/MacOS/cua-driver \
+            "- Screen Recording: /Users/me/Downloads/ComputerUse.app/Contents/MacOS/computer-use \
              (version 0.34.0, files gone)"
         ));
         assert!(detail.contains("click the minus button"));
-        assert!(detail.contains("tccutil reset Accessibility com.trycua.driver"));
+        assert!(detail.contains("tccutil reset Accessibility com.taloshq.computer-use"));
     }
 
     #[test]
     fn permission_rows_for_the_installed_app_and_its_bundle_id_are_fine() {
-        let active = Path::new("/Applications/CuaDriver.app/Contents/MacOS/cua-driver");
+        let active = Path::new("/Applications/ComputerUse.app/Contents/MacOS/computer-use");
         let rows = Ok(parse_tcc_rows(
-            "kTCCServiceAccessibility|com.trycua.driver|0\n\
-             kTCCServiceAccessibility|/Applications/CuaDriver.app/Contents/MacOS/cua-driver|1\n",
+            "kTCCServiceAccessibility|com.taloshq.computer-use|0\n\
+             kTCCServiceAccessibility|/Applications/ComputerUse.app/Contents/MacOS/computer-use|1\n",
         ));
 
         let probe = permission_row_probe(active, rows, |_| None);
@@ -824,7 +824,7 @@ identifier:                 com.trycua.driver
     #[test]
     fn an_unreadable_permission_database_is_reported_as_not_checked() {
         let probe = permission_row_probe(
-            Path::new("/Applications/CuaDriver.app/Contents/MacOS/cua-driver"),
+            Path::new("/Applications/ComputerUse.app/Contents/MacOS/computer-use"),
             Err("macOS only lets apps with Full Disk Access read the permission database".into()),
             |_| None,
         );

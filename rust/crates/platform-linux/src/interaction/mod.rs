@@ -113,6 +113,9 @@ pub fn with_target_foreground<T>(
     body: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
     use crate::wayland::{bind_foreground_target, kwin_helper, niri, shell_helper, sway_ipc};
+    if crate::wayland::kwin_script::knows_window(window_id) {
+        return crate::wayland::kwin_input::foreground(pid, window_id, mode, body);
+    }
     if let RestoreMode::LeaveFocused = mode {
         admit_lock(
             policy::Scope::TargetBoundInput,

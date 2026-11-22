@@ -17,6 +17,10 @@ pkgs.mkShell {
     libei
     libxkbcommon
     dbus
+    # Disposable native GTK fixture for KDE input validation.
+    gtk3
+    gobject-introspection
+    (python3.withPackages (p: [ p.pygobject3 ]))
   ];
   # The portal video route dlopens libpipewire at runtime.
   LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.pipewire ];

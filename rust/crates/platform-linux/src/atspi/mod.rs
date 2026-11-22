@@ -17,6 +17,7 @@ use anyhow::Result;
 
 pub mod native;
 pub mod snapshot;
+pub mod status;
 pub use native::ensure_listener_active;
 pub use native::InputMayHaveLanded;
 pub use snapshot::Snapshots;

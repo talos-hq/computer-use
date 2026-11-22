@@ -24,8 +24,10 @@ pub mod hyprland_input;
 pub mod kwin_access;
 pub mod kwin_capture;
 pub mod kwin_helper;
+pub(crate) mod kwin_input;
 #[cfg(feature = "portal-input")]
 mod kwin_keystate;
+pub mod kwin_script;
 pub(crate) mod logical_layout;
 pub mod niri;
 pub use niri::keyboard::call_budget as niri_keyboard_budget;
@@ -1270,6 +1272,50 @@ pub fn screenshot_dispatch_with_pid(xid: u64, pid: u32) -> anyhow::Result<Vec<u8
 }
 
 fn screenshot_dispatch_for_pid(xid: u64, pid: Option<u32>) -> anyhow::Result<Vec<u8>> {
+    if is_wayland() && kwin_script::knows_window(xid) {
+        let before = kwin_script::window(xid, pid)?;
+        anyhow::ensure!(
+            before.on_screen && before.unoccluded,
+            "KWin screenshot crop requires a visible, unoccluded target; bring_to_front first"
+        );
+        let layout = logical_desktop_layout()?
+            .ok_or_else(|| anyhow::anyhow!("KWin logical output layout unavailable"))?;
+        let png = screenshot_display_dispatch()?;
+        let image = image::load_from_memory(&png)?;
+        anyhow::ensure!(
+            (image.width() as f64 / layout.frame.width as f64
+                - image.height() as f64 / layout.frame.height as f64)
+                .abs()
+                < 0.01,
+            "KWin portal capture cannot be uniformly mapped to the logical layout"
+        );
+        let image = image.resize_exact(
+            layout.frame.width,
+            layout.frame.height,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let after = kwin_script::window(xid, pid)?;
+        anyhow::ensure!(
+            after.unoccluded
+                && after.on_screen
+                && (before.x, before.y, before.width, before.height)
+                    == (after.x, after.y, after.width, after.height),
+            "KWin target moved or became occluded during screenshot"
+        );
+        let (x, y) = layout.frame.from_layout(before.x, before.y);
+        anyhow::ensure!(
+            x >= 0
+                && y >= 0
+                && (x as u64 + before.width as u64) <= image.width() as u64
+                && (y as u64 + before.height as u64) <= image.height() as u64,
+            "KWin window is partly outside captured output"
+        );
+        let mut out = std::io::Cursor::new(Vec::new());
+        image
+            .crop_imm(x as u32, y as u32, before.width, before.height)
+            .write_to(&mut out, image::ImageFormat::Png)?;
+        return Ok(out.into_inner());
+    }
     if is_wayland() && kwin_capture::knows_window(xid) {
         return kwin_capture::capture(xid, pid).map_err(|error| {
             tracing::debug!("KWin window capture refused: {error:#}");
@@ -2077,6 +2123,13 @@ fn no_input_activation(window_id: u64) -> anyhow::Error {
 /// path fired through AT-SPI. No global input follows, so KWin's activation is
 /// safe here where [`activate_window_for_input_target`] refuses it.
 pub fn activate_window(window_id: u64, target_pid: Option<u32>) -> anyhow::Result<()> {
+    if kwin_script::knows_window(window_id) {
+        return kwin_script::activate(
+            window_id,
+            target_pid,
+            crate::interaction::operation_deadline(std::time::Duration::from_secs(3)),
+        );
+    }
     if kwin_capture::knows_window(window_id) {
         return kwin_capture::activate(window_id, target_pid);
     }
@@ -2103,6 +2156,13 @@ pub fn activate_window_for_input_target(
     window_id: u64,
     target_pid: Option<u32>,
 ) -> anyhow::Result<()> {
+    if kwin_script::knows_window(window_id) {
+        return kwin_script::activate(
+            window_id,
+            target_pid,
+            crate::interaction::operation_deadline(std::time::Duration::from_secs(3)),
+        );
+    }
     refuse_kwin_input(window_id)?;
     if is_wayland() && hyprland::is_session() {
         // A full compositor address must never enter the generic protocol-id
@@ -2216,6 +2276,21 @@ fn event_time_ms() -> u32 {
 /// real coords. A short delay between iterations gives the compositor time
 /// to discriminate single vs. double clicks.
 pub fn click(window_id: u64, at: AimedPoint, count: u32, button: u8) -> anyhow::Result<()> {
+    if kwin_script::knows_window(window_id) {
+        let w = kwin_script::window(window_id, None)?;
+        libei_wait_pointer_ready()?;
+        return kwin_input::foreground(
+            w.pid,
+            window_id,
+            crate::interaction::RestoreMode::LeaveFocused,
+            || {
+                kwin_input::deliver(|| {
+                    kwin_input::point(at.point.0, at.point.1)?;
+                    libei_click_point(at.point.0, at.point.1, count, button)
+                })
+            },
+        );
+    }
     // Before the fallback below can ask for portal consent on a doomed call.
     refuse_kwin_input(window_id)?;
     with_libei_fallback(
@@ -2238,6 +2313,13 @@ pub fn click(window_id: u64, at: AimedPoint, count: u32, button: u8) -> anyhow::
 #[cfg(feature = "portal-input")]
 pub fn click_focused(at: AimedPoint, count: u32, button: u8) -> anyhow::Result<()> {
     let (x, y) = at.point;
+    if current_foreground_target().is_some_and(|(_, id)| kwin_script::knows_window(id)) {
+        libei_wait_pointer_ready()?;
+        return kwin_input::deliver(|| {
+            kwin_input::point(x, y)?;
+            libei_click_point(x, y, count, button)
+        });
+    }
     with_libei_fallback(
         || click_vptr(None, at, count, button, None),
         || {
@@ -2477,6 +2559,15 @@ pub fn window_local_to_output(window_id: u64, x: i32, y: i32) -> anyhow::Result<
     if niri::is_session() {
         return niri::aim(window_id, x, y);
     }
+    if kwin_script::knows_window(window_id) {
+        let w = kwin_script::window(window_id, None)?;
+        let point = kwin_input::map_point(&w, x, y)?;
+        kwin_input::aimed(&w);
+        // Window screenshots and KWin frameGeometry are logical pixels. The
+        // portal frame is normalized before cropping, so do NOT multiply by
+        // output scale again. libei's region router receives layout coordinates.
+        return Ok(point.into());
+    }
     Ok(window_geometry(window_id)
         .map(|(window_x, window_y, _, _)| (window_x.saturating_add(x), window_y.saturating_add(y)))
         .unwrap_or((x, y))
@@ -2487,6 +2578,11 @@ pub fn window_local_to_output(window_id: u64, x: i32, y: i32) -> anyhow::Result<
 /// object ID came from an earlier Wayland connection. Protocol object IDs are
 /// connection-local, so direct equality is only a fast path.
 pub fn window_geometry(window_id: u64) -> Option<(i32, i32, u32, u32)> {
+    if kwin_script::knows_window(window_id) {
+        return kwin_script::window(window_id, None)
+            .ok()
+            .map(|w| (w.x, w.y, w.width, w.height));
+    }
     if is_wayland() && hyprland::is_session() {
         // Do not fall back to title, app-id, X11, or another compositor when
         // an explicit native Hyprland address is missing.
@@ -2574,6 +2670,28 @@ pub fn scroll_at(
     direction: &str,
     amount: u32,
 ) -> anyhow::Result<()> {
+    if kwin_script::knows_window(window_id) {
+        let w = kwin_script::window(window_id, None)?;
+        let at = point
+            .map(|p| p.point)
+            .unwrap_or((w.x + w.width as i32 / 2, w.y + w.height as i32 / 2));
+        libei_wait_scroll_ready()?;
+        return kwin_input::foreground(
+            w.pid,
+            window_id,
+            crate::interaction::RestoreMode::LeaveFocused,
+            || {
+                kwin_input::deliver(|| {
+                    kwin_input::point(at.0, at.1)?;
+                    libei_move_absolute(at.0, at.1)
+                })?;
+                for _ in 0..amount.max(1) {
+                    kwin_input::deliver(|| libei_scroll(direction, 1))?;
+                }
+                Ok(())
+            },
+        );
+    }
     refuse_kwin_input(window_id)?;
     let direction = direction.to_string();
     with_libei_fallback(
@@ -2758,6 +2876,30 @@ pub fn drag(
     duration_ms: u64,
     button: u8,
 ) -> anyhow::Result<()> {
+    if kwin_script::knows_window(window_id) {
+        let w = kwin_script::window(window_id, None)?;
+        libei_wait_pointer_ready()?;
+        return kwin_input::foreground(
+            w.pid,
+            window_id,
+            crate::interaction::RestoreMode::LeaveFocused,
+            || {
+                kwin_input::deliver(|| {
+                    kwin_input::point(from.point.0, from.point.1)?;
+                    kwin_input::point(to.point.0, to.point.1)?;
+                    libei_drag(
+                        from.point.0,
+                        from.point.1,
+                        to.point.0,
+                        to.point.1,
+                        steps,
+                        duration_ms,
+                        button,
+                    )
+                })
+            },
+        );
+    }
     refuse_kwin_input(window_id)?;
     let ((from_x, from_y), (to_x, to_y)) = (from.point, to.point);
     with_libei_fallback(
@@ -2924,6 +3066,26 @@ fn type_into(window: Option<u64>, text: &str) -> anyhow::Result<()> {
         return Ok(());
     }
     let text = &*text_keys::typable_text(text)?;
+    if let Some((pid, id)) = window
+        .and_then(|id| kwin_script::window(id, None).ok().map(|w| (w.pid, id)))
+        .or_else(current_foreground_target)
+        .filter(|(_, id)| kwin_script::knows_window(*id))
+    {
+        libei_wait_keyboard_ready()?;
+        return kwin_input::foreground(
+            pid,
+            id,
+            crate::interaction::RestoreMode::LeaveFocused,
+            || {
+                for chunk in text.chars().collect::<Vec<_>>().chunks(16) {
+                    let text: String = chunk.iter().collect();
+                    kwin_input::deliver(|| libei_type_text(&text))?;
+                }
+                Ok(())
+            },
+        );
+    }
+
     window.map_or(Ok(()), activate_window_for_input)?;
     if niri::is_session() {
         return niri::keyboard::type_text(window.or_else(niri_expected_window), text);
@@ -2956,6 +3118,10 @@ fn type_into(window: Option<u64>, text: &str) -> anyhow::Result<()> {
 /// headless wlroots seat dropping the first event from a second `wtype`
 /// process after the text has landed.
 pub fn type_text_then_key_focused(text: &str, key: &str) -> anyhow::Result<()> {
+    if current_foreground_target().is_some_and(|(_, id)| kwin_script::knows_window(id)) {
+        type_text_focused(text)?;
+        return press_key_focused(key);
+    }
     let text = &*text_keys::typable_text(text)?;
     let keysym = key_to_keysym(key);
     if niri::is_session() {
@@ -3002,6 +3168,19 @@ pub fn press_key_focused(key: &str) -> anyhow::Result<()> {
 
 /// [`press_key`] into `window`, activated first, or [`press_key_focused`].
 fn press_into(window: Option<u64>, key: &str) -> anyhow::Result<()> {
+    if let Some((pid, id)) = window
+        .and_then(|id| kwin_script::window(id, None).ok().map(|w| (w.pid, id)))
+        .or_else(current_foreground_target)
+        .filter(|(_, id)| kwin_script::knows_window(*id))
+    {
+        libei_wait_keyboard_ready()?;
+        return kwin_input::foreground(
+            pid,
+            id,
+            crate::interaction::RestoreMode::LeaveFocused,
+            || kwin_input::deliver(|| libei_press_key(key)),
+        );
+    }
     window.map_or(Ok(()), activate_window_for_input)?;
     let keysym = key_to_keysym(key);
     if niri::is_session() {
@@ -3044,6 +3223,20 @@ pub fn hotkey_focused(keys: &[String]) -> anyhow::Result<()> {
 
 /// [`hotkey`] into `window`, activated first, or [`hotkey_focused`].
 fn chord_into(window: Option<u64>, keys: &[String]) -> anyhow::Result<()> {
+    if let Some((pid, id)) = window
+        .and_then(|id| kwin_script::window(id, None).ok().map(|w| (w.pid, id)))
+        .or_else(current_foreground_target)
+        .filter(|(_, id)| kwin_script::knows_window(*id))
+    {
+        let (mods, key) = partition_modifiers(keys)?;
+        libei_wait_keyboard_ready()?;
+        return kwin_input::foreground(
+            pid,
+            id,
+            crate::interaction::RestoreMode::LeaveFocused,
+            || kwin_input::deliver(|| libei_hotkey(&mods, &key)),
+        );
+    }
     window.map_or(Ok(()), activate_window_for_input)?;
     let (mods, final_key) = partition_modifiers(keys)?;
     if niri::is_session() {
@@ -4289,6 +4482,12 @@ pub fn list_windows_dispatch(filter_pid: Option<u32>) -> Vec<WindowInfo> {
         // Do not probe unrelated compositor protocols for every preview frame.
         if let Some(ws) = shell_helper::list_windows(filter_pid) {
             return listed_windows(ws);
+        }
+        if kwin_capture::may_be_session() {
+            match kwin_script::infos() {
+                Ok(ws) => return listed_windows(apply_pid_filter(ws, filter_pid)),
+                Err(error) => tracing::debug!("KWin scripting enumeration unavailable: {error:#}"),
+            }
         }
         if kwin_capture::may_be_session() && kwin_access::allowed() {
             match kwin_capture::list_windows() {
@@ -5673,4 +5872,9 @@ mod tests {
         assert!(parse_inject_geometry("err target-not-found").is_err());
         assert!(parse_inject_geometry("ok").is_err());
     }
+}
+
+#[cfg(not(feature = "portal-input"))]
+fn libei_hotkey(_mods: &[String], _key: &str) -> anyhow::Result<()> {
+    anyhow::bail!("KWin foreground input requires portal-input support")
 }

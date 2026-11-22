@@ -182,11 +182,12 @@ pub async fn spawn_blocking_bounded<T: Send + 'static>(
     let action = outer.clone().unwrap_or_else(|| Action::new(budget));
     let budget = budget.min(action.deadline.saturating_duration_since(Instant::now()));
     let _abandon = outer.is_none().then(|| action.abandon_on_drop());
+    let kwin_call = crate::wayland::kwin_input::current();
     let worker = {
         let action = action.clone();
         move || {
             let _bound = bind(action);
-            f()
+            crate::wayland::kwin_input::bound(kwin_call, f)
         }
     };
     match tokio::time::timeout(budget, tokio::task::spawn_blocking(worker)).await {

@@ -307,14 +307,17 @@ fn pid_window_guarded<T: Tool + 'static>(
     (candidates, point_resolver, fallback_resolver, snapshot_resolver, token_pid_resolver): &PidWindowGuardParts,
 ) -> Box<dyn Tool> {
     Box::new(
-        PidOnlyWindowTargetGuard::new(Box::new(tool), candidates.clone())
-            .with_point_resolver(point_resolver.clone())
-            .with_fallback_resolver(fallback_resolver.clone())
-            .with_snapshot_resolver(snapshot_resolver.clone())
-            .with_token_pid_resolver(token_pid_resolver.clone())
-            .with_not_found_note(Arc::new(|pid| {
-                crate::atspi::unlisted_window_note(u32::try_from(pid).ok()?)
-            })),
+        PidOnlyWindowTargetGuard::new(
+            crate::wayland::kwin_input::Tool::wrap(Box::new(tool)),
+            candidates.clone(),
+        )
+        .with_point_resolver(point_resolver.clone())
+        .with_fallback_resolver(fallback_resolver.clone())
+        .with_snapshot_resolver(snapshot_resolver.clone())
+        .with_token_pid_resolver(token_pid_resolver.clone())
+        .with_not_found_note(Arc::new(|pid| {
+            crate::atspi::unlisted_window_note(u32::try_from(pid).ok()?)
+        })),
     )
 }
 

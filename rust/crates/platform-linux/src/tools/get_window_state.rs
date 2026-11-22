@@ -55,8 +55,10 @@ fn kwin_topmost_window(pid: u32) -> Option<u64> {
     if !crate::wayland::is_wayland() || !crate::wayland::kwin_capture::may_be_session() {
         return None;
     }
-    super::impl_::pid_fallback_window_resolver()(i64::from(pid))
-        .filter(|window| crate::wayland::kwin_capture::knows_window(*window))
+    super::impl_::pid_fallback_window_resolver()(i64::from(pid)).filter(|window| {
+        crate::wayland::kwin_script::knows_window(*window)
+            || crate::wayland::kwin_capture::knows_window(*window)
+    })
 }
 
 /// The window a pid-only read means when the input resolver chose none.
@@ -872,6 +874,11 @@ impl Tool for GetWindowStateTool {
                     let local_origin = (!crate::wayland::is_wayland())
                         .then(|| crate::atspi::native::x11_window_origin(xid))
                         .flatten()
+                        .or_else(|| {
+                            crate::wayland::kwin_script::knows_window(xid)
+                                .then(|| window_meta.as_ref().map(|w| (w.x, w.y)))
+                                .flatten()
+                        })
                         .or_else(|| popup_meta.as_ref().map(|popup| (popup.x, popup.y)));
                     let bounds_by_idx: HashMap<usize, (i32, i32, u32, u32)> = bounds
                         .into_iter()

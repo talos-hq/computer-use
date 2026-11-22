@@ -9,11 +9,10 @@
 //! mutation methods. KWin's portal/libei input path is still focus-bound: libei
 //! delivers to whichever surface is focused when KWin processes the event.
 //!
-//! A focus check followed by global input therefore has an unavoidable TOCTOU
-//! race. Until Cua has a KWin input API that binds each mutation to the target
-//! token/window, [`available`] reports no target-bound input and the shared
-//! delivery policy refuses raw target-addressed input. Window discovery
-//! remains available; input authorization does not.
+//! The read-only plugin still reports no atomic target-bound input. KDE's
+//! separate `kwin_script` / `kwin_input` adapters provide explicitly foreground,
+//! best-effort activation and pre/post-verified libei input. They never turn
+//! this helper's presence into a claim of atomic target-bound delivery.
 
 use std::collections::HashSet;
 use std::os::unix::fs::MetadataExt;
@@ -61,13 +60,35 @@ pub fn available() -> bool {
 /// The index of the keyboard layout KWin has active, or `None` when this isn't
 /// KWin or it doesn't answer. KWin before 6.8 doesn't tell libei clients.
 pub fn active_layout() -> Option<u32> {
-    let reply = gdbus_call_to(
-        "org.kde.keyboard",
-        "/Layouts",
-        "org.kde.KeyboardLayouts.getLayout",
-        &[],
-    )?;
-    parse_first_u32(&reply)
+    let wait = crate::interaction::operation_deadline(CALL_TIMEOUT)
+        .saturating_duration_since(std::time::Instant::now());
+    // The NixOS host need not have the gdbus executable. This read is also
+    // needed on KWin releases that omit active layout from the EIS keymap.
+    std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?
+            .block_on(async {
+                tokio::time::timeout(wait, async {
+                    let connection = zbus::Connection::session().await?;
+                    let proxy: zbus::Proxy<'_> = zbus::proxy::Builder::new(&connection)
+                        .destination("org.kde.keyboard")?
+                        .path("/Layouts")?
+                        .interface("org.kde.KeyboardLayouts")?
+                        .cache_properties(zbus::proxy::CacheProperties::No)
+                        .build()
+                        .await?;
+                    proxy.call::<_, _, u32>("getLayout", &()).await
+                })
+                .await
+                .ok()?
+                .ok()
+            })
+    })
+    .join()
+    .ok()
+    .flatten()
 }
 
 pub fn list_windows() -> Option<Vec<KwinWindow>> {

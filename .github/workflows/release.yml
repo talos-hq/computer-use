@@ -415,8 +415,13 @@ jobs:
                   $sig = Get-AuthenticodeSignature $file
                   Write-Host "$file $($sig.Status) $($sig.SignerCertificate.Subject)"
                   if ($sig.Status -ne 'Valid') { throw "Invalid signature for $file" }
-                  if ($env:EXPECTED_SUBJECT -and $sig.SignerCertificate.GetNameInfo('SimpleName', $false) -ne ($env:EXPECTED_SUBJECT -replace '^CN=', '')) {
-                      throw "Unexpected certificate subject for $file"
+                  if ($env:EXPECTED_SUBJECT) {
+                      $publisher = $env:EXPECTED_SUBJECT.Trim()
+                      $subject = $sig.SignerCertificate.Subject
+                      $commonName = $sig.SignerCertificate.GetNameInfo('SimpleName', $false)
+                      if ($subject -ne $publisher -and $commonName -ne ($publisher -replace '^CN=', '')) {
+                          throw "Unexpected certificate subject for $file"
+                      }
                   }
                   & $signTool.FullName verify /pa /v $file
                   if ($LASTEXITCODE) { throw "signtool failed for $file" }

@@ -85,9 +85,12 @@ fn validate_monitor_geometry(
     let size_matches = size.is_none_or(|(w, h)| {
         u32::try_from(w).ok() == Some(width) && u32::try_from(h).ok() == Some(height)
     });
-    let geometry_known = position.is_some() && size.is_some();
+    // KDE's combined desktop source supplies its full logical size but no
+    // position. A source as large as the bounding desktop cannot be a proper
+    // subset of that desktop; its origin is therefore the desktop origin.
+    let full_size_known = size.is_some();
     anyhow::ensure!(
-        position_matches && size_matches && (geometry_known || output_count == 1),
+        position_matches && size_matches && (full_size_known || output_count == 1),
         "shared portal monitor does not cover the full desktop layout; multi-monitor portal composition is not supported (source position {position:?}, size {size:?}, desktop {desktop:?})"
     );
     Ok(())
@@ -879,6 +882,11 @@ mod tests {
 
     #[test]
     fn selected_monitor_must_cover_the_desktop_action_frame() {
+        // KDE combines all screens into one node and omits position.
+        assert!(validate_monitor_geometry(None, Some((3983, 1539)), (0, 0, 3983, 1539), 2).is_ok());
+        assert!(
+            validate_monitor_geometry(None, Some((1920, 1080)), (0, 0, 3840, 1080), 2).is_err()
+        );
         assert!(validate_monitor_geometry(
             Some((1920, 0)),
             Some((1920, 1080)),

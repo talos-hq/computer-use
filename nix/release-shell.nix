@@ -25,8 +25,8 @@ let
     exec ${pkgs.pkg-config}/bin/pkg-config "$@"
   '';
 in pkgs.mkShell {
-  nativeBuildInputs = [ pkgs.pkg-config pkgs.binutils pkgs.patchelf
-    pkgs.rustPlatform.bindgenHook ];
+  nativeBuildInputs = [ pkgs.pkg-config pkgs.binutils pkgs.patchelf ];
+  LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
   buildInputs = [ headerMetadata ];
   shellHook = ''
     export PATH="${pkgConfig}/bin:$PATH"

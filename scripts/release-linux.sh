@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Build the native Linux release through soldr against the glibc 2.17 sysroot.
+# Build the Linux release through soldr against the glibc 2.17 sysroot.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-case "$(uname -sm)" in
-    'Linux x86_64') arch=x86_64; interpreter=/lib64/ld-linux-x86-64.so.2 ;;
-    'Linux aarch64') arch=aarch64; interpreter=/lib/ld-linux-aarch64.so.1 ;;
-    *) echo 'Linux release builds require a native x86_64 or aarch64 host.' >&2; exit 1 ;;
+if [[ $(uname -sm) != 'Linux x86_64' ]]; then
+    echo 'The soldr glibc 2.17 toolchain requires a Linux x86_64 build host.' >&2
+    exit 1
+fi
+arch=${COMPUTER_USE_RELEASE_ARCH:-x86_64}
+case "$arch" in
+    x86_64) interpreter=/lib64/ld-linux-x86-64.so.2 ;;
+    aarch64) interpreter=/lib/ld-linux-aarch64.so.1 ;;
+    *) printf 'Unsupported Linux release architecture: %s\n' "$arch" >&2; exit 1 ;;
 esac
 export COMPUTER_USE_ROOT="$root"
 export COMPUTER_USE_RELEASE_OUT="$(realpath -m -- "${1:-$root/dist}")"
@@ -17,6 +22,10 @@ version=$(awk '/^\[workspace.package\]/{p=1;next} /^\[/{p=0} p && /^version = /{
 [[ -n "$version" ]]
 target="$arch-unknown-linux-gnu"
 baseline=2.17
+# Generate PipeWire/SPA bindings with target libc headers on either architecture.
+sysroot=$(soldr cc --target "$arch-linux-gnu.$baseline" -print-sysroot)
+target_strip=$(soldr cc --target "$arch-linux-gnu.$baseline" -print-prog-name=strip)
+export BINDGEN_EXTRA_CLANG_ARGS="--target=$target --sysroot=\"$sysroot\""
 (cd -- "$root/rust" && nice -n 10 soldr build --target "$target.$baseline" \
     -j 4 --release -p cua-driver --bin computer-use --locked)
 mkdir -p -- "$COMPUTER_USE_RELEASE_OUT"
@@ -30,8 +39,9 @@ fi
 name="computer-use-$version-linux-$arch"
 bundle="$stage/$name"
 mkdir -p -- "$bundle"
-install -m755 -- "$root/rust/target/$target/release/computer-use" "$bundle/computer-use"
-strip --strip-unneeded "$bundle/computer-use"
+target_dir=$(cd -- "$root/rust" && realpath -m -- "${CARGO_TARGET_DIR:-target}")
+install -m755 -- "$target_dir/$target/release/computer-use" "$bundle/computer-use"
+"$target_strip" --strip-unneeded "$bundle/computer-use"
 # Standard loader on glibc distros; NixOS supports it with programs.nix-ld.enable.
 # The Nix package patches this to its own interpreter, without needing nix-ld.
 patchelf --set-interpreter "$interpreter" --remove-rpath "$bundle/computer-use"

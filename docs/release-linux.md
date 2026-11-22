@@ -33,10 +33,11 @@ cannot solve that loader requirement.
 
 ## Build and install
 
-From a clean checkout on Linux x86_64 or aarch64:
+From a clean checkout on Linux x86_64:
 
 ```sh
-./scripts/release-linux.sh              # output: dist/*.tar.gz and *.sha256
+./scripts/release-linux.sh
+COMPUTER_USE_RELEASE_ARCH=aarch64 ./scripts/release-linux.sh
 ./scripts/install-local.sh --prefix "$HOME/.local" dist/computer-use-0.57.1-linux-x86_64.tar.gz
 ```
 
@@ -44,7 +45,8 @@ The release script requires Nix, soldr, safe-mktemp and safe-rm on PATH. It uses
 `nix/release-shell.nix` for host build tools and current PipeWire headers.
 Header-only pkg-config metadata keeps host PipeWire libraries out of the target
 link. The script runs `soldr build --target "$arch-unknown-linux-gnu.2.17"`
-with the lockfile so soldr selects the glibc 2.17 sysroot. It strips the
+with the lockfile so soldr selects the glibc 2.17 sysroot. Both architectures
+build on x86_64 because soldr ships an x86_64-hosted compiler for these targets. It strips the
 binary, sets the standard glibc loader, removes build-machine RPATHs, rejects
 hard-linked desktop libraries, preserves symlinks and writes SHA-256. Rust's
 release profile also strips symbols and uses fat LTO. CI runs each packaged binary on a matching glibc 2.17 userspace. Build archives stay out

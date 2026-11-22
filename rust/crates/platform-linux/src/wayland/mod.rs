@@ -1061,20 +1061,26 @@ fn screencopy_first_output() -> anyhow::Result<(Vec<u8>, Option<String>)> {
     result.map(|png| (png, state.output_name.take()))
 }
 
+/// Create a close-on-exec memfd without requiring glibc's 2.27 wrapper.
+fn create_memfd(name: &std::ffi::CStr) -> std::io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::FromRawFd;
+    // SAFETY: name is NUL-terminated, the flags are valid, and a nonnegative
+    // result is a new descriptor owned by this call.
+    let fd = unsafe { libc::syscall(libc::SYS_memfd_create, name.as_ptr(), libc::MFD_CLOEXEC) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(fd as libc::c_int) })
+}
+
 /// Allocate an anonymous shared-memory file of `size` bytes and mmap it RW.
 /// Returns the raw fd and the mmap pointer; the caller is responsible for
 /// passing both to [`cleanup_mmap`] when done.
 pub(crate) fn anon_shm(size: usize) -> anyhow::Result<(i32, *mut libc::c_void)> {
-    // memfd_create is Linux-only and is the cleanest path; fall back to
-    // shm_open if memfd isn't available for any reason.
-    let name = b"cua-scrcopy\0";
-    let fd = unsafe { libc::memfd_create(name.as_ptr() as *const libc::c_char, libc::MFD_CLOEXEC) };
-    if fd < 0 {
-        return Err(anyhow::anyhow!(
-            "memfd_create failed: {}",
-            std::io::Error::last_os_error()
-        ));
-    }
+    use std::os::fd::IntoRawFd;
+    let fd = create_memfd(c"cua-scrcopy")
+        .map_err(|err| anyhow::anyhow!("memfd_create failed: {err}"))?
+        .into_raw_fd();
     let rc = unsafe { libc::ftruncate(fd, size as libc::off_t) };
     if rc != 0 {
         let err = std::io::Error::last_os_error();
@@ -4861,6 +4867,19 @@ mod output_transform_tests {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn memfd_is_writable_and_closes_on_exec() {
+        use std::io::Write;
+        use std::os::fd::AsRawFd;
+
+        let mut file = std::fs::File::from(super::create_memfd(c"cua-memfd-test").unwrap());
+        let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFD) };
+        assert!(flags >= 0);
+        assert_ne!(flags & libc::FD_CLOEXEC, 0);
+        file.write_all(b"test").unwrap();
+        assert_eq!(file.metadata().unwrap().len(), 4);
+    }
+
     /// Paced text is refused whole, as unpaced text is, so a retry can't type
     /// its start twice.
     #[test]

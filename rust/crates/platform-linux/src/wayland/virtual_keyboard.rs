@@ -3,10 +3,9 @@
 
 //! Stable physical-key injection for wlroots virtual-keyboard compositors.
 
-use std::ffi::CString;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
-use std::os::fd::{AsFd, FromRawFd};
+use std::os::fd::AsFd;
 
 use wayland_client::protocol::{wl_registry, wl_seat::WlSeat};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
@@ -168,12 +167,7 @@ fn send_key(
 }
 
 fn keymap_file() -> anyhow::Result<File> {
-    let name = CString::new("cua-driver-keymap")?;
-    let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
-    if fd < 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
-    let mut file = unsafe { File::from_raw_fd(fd) };
+    let mut file = File::from(super::create_memfd(c"cua-driver-keymap")?);
     file.write_all(XKB_KEYMAP.as_bytes())?;
     file.write_all(&[0])?;
     file.seek(SeekFrom::Start(0))?;

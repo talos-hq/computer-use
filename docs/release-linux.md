@@ -4,7 +4,7 @@ This is the talos-hq MIT fork of Cua's driver. Telemetry and updates are disable
 input is unrestricted by default. KDE target guards and the shared persistent
 RemoteDesktop + ScreenCast portal session are included.
 
-The x86_64 and aarch64 tarballs require glibc 2.34 or later (Debian 12 / Ubuntu 22.04+).
+The x86_64 and aarch64 tarballs require glibc 2.17 or later. Desktop features also need the runtime libraries and display services described below.
 Extract its single directory and run `./computer-use --version` or
 `./computer-use doctor`. The `cua-driver`, `cua-cursor-theme` and `cua-perception`
 names are relative symlinks to the same multicall executable. Keep
@@ -33,22 +33,23 @@ cannot solve that loader requirement.
 
 ## Build and install
 
-From a clean checkout on Linux x86_64 or aarch64:
+From a clean checkout on Linux x86_64:
 
 ```sh
-./scripts/release-linux.sh              # output: dist/*.tar.gz and *.sha256
-./scripts/install-local.sh --prefix "$HOME/.local" dist/computer-use-0.57.1-linux-x86_64.tar.gz
+./scripts/release-linux.sh
+COMPUTER_USE_RELEASE_ARCH=aarch64 ./scripts/release-linux.sh
+./scripts/install-local.sh --prefix "$HOME/.local" dist/computer-use-0.57.2-linux-x86_64.tar.gz
 ```
 
 The release script requires Nix, soldr, safe-mktemp and safe-rm on PATH. It uses
-the repository's `nix/release-shell.nix`, a pinned NixOS 22.05 compiler/glibc 2.34
-baseline with current PipeWire headers for full portal capture. Header-only
-pkg-config metadata suppresses PipeWire's unused native link flags; libclang,
-compiler runtime and Cargo's linker are pinned to the baseline. The script invokes
-`nice -n 10 soldr cargo build -j 4 --release` with the lockfile. It strips the
+`nix/release-shell.nix` for host build tools and current PipeWire headers.
+Header-only pkg-config metadata keeps host PipeWire libraries out of the target
+link. The script runs `soldr build --target "$arch-unknown-linux-gnu.2.17"`
+with the lockfile so soldr selects the glibc 2.17 sysroot. Both architectures
+build on x86_64 because soldr ships an x86_64-hosted compiler for these targets. It strips the
 binary, sets the standard glibc loader, removes build-machine RPATHs, rejects
 hard-linked desktop libraries, preserves symlinks and writes SHA-256. Rust's
-release profile also strips symbols and uses fat LTO. Build archives stay out
+release profile also strips symbols and uses fat LTO. CI runs each packaged binary on a matching glibc 2.17 userspace. Build archives stay out
 of git. Normal development still uses `nix-shell` and soldr.
 
 `install-local.sh` requires Python 3. It also accepts an unpacked release directory or a built binary;

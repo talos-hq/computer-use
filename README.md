@@ -8,14 +8,14 @@ the upstream updater, and `connect` remain disabled.
 
 ## Build and install
 
-Portable Linux x86_64 releases (glibc 2.34+) include the multicall binary,
+Portable Linux x86_64 and aarch64 releases (glibc 2.17+) include the multicall binary,
 compatibility symlinks and `wayland-helper/`. See [Linux releases and Nix
 installation](docs/release-linux.md) for runtime library discovery, prerequisites
 and platform gaps.
 
 ```sh
 ./scripts/release-linux.sh
-./scripts/install-local.sh --prefix "$HOME/.local" dist/computer-use-0.57.1-linux-x86_64.tar.gz
+./scripts/install-local.sh --prefix "$HOME/.local" dist/computer-use-0.57.2-linux-x86_64.tar.gz
 nix-build nix/package.nix
 ```
 

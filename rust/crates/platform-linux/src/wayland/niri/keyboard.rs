@@ -702,14 +702,7 @@ impl Strokes for Keyboard {
 }
 
 fn keymap_file(map: &str) -> Result<File> {
-    let name = std::ffi::CString::new("cua-driver-niri-keymap")?;
-    // SAFETY: memfd_create with a valid C string; the fd is owned below.
-    let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
-    if fd < 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
-    // SAFETY: fd is a freshly created, owned memfd.
-    let mut file = unsafe { <File as std::os::fd::FromRawFd>::from_raw_fd(fd) };
+    let mut file = File::from(crate::wayland::create_memfd(c"cua-driver-niri-keymap")?);
     file.write_all(map.as_bytes())?;
     file.write_all(&[0])?;
     file.seek(SeekFrom::Start(0))?;

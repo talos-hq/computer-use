@@ -15,7 +15,7 @@ and platform gaps.
 
 ```sh
 ./scripts/release-linux.sh
-./scripts/install-local.sh --prefix "$HOME/.local" dist/computer-use-0.57.1-linux-x86_64.tar.gz
+./scripts/install-local.sh --prefix "$HOME/.local" dist/computer-use-0.57.2-linux-x86_64.tar.gz
 nix-build nix/package.nix
 ```
 

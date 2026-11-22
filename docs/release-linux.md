@@ -38,7 +38,7 @@ From a clean checkout on Linux x86_64:
 ```sh
 ./scripts/release-linux.sh
 COMPUTER_USE_RELEASE_ARCH=aarch64 ./scripts/release-linux.sh
-./scripts/install-local.sh --prefix "$HOME/.local" dist/computer-use-0.57.1-linux-x86_64.tar.gz
+./scripts/install-local.sh --prefix "$HOME/.local" dist/computer-use-0.57.2-linux-x86_64.tar.gz
 ```
 
 The release script requires Nix, soldr, safe-mktemp and safe-rm on PATH. It uses

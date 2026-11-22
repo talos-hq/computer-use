@@ -97,10 +97,7 @@ fn configure_startup_permission_mode(
     } else if dangerously_bypass_approvals
         && std::env::var_os(cua_driver_core::authorization::PERMISSION_MODE_ENV).is_none()
     {
-        // The alarming CLI flag is both the unrestricted-mode selector and
-        // the user's explicit launch-time risk acknowledgement. Embedded and
-        // environment-driven launchers retain the two-part mode + acceptance
-        // contract because they do not pass through this CLI normalization.
+        // Retain the old flag as an unrestricted-mode compatibility alias.
         std::env::set_var(
             cua_driver_core::authorization::PERMISSION_MODE_ENV,
             "unrestricted",
@@ -128,12 +125,12 @@ fn configure_startup_permission_mode(
     }
     cua_driver_core::authorization::configure_launch_grants(grants).map_err(anyhow::Error::msg)?;
     cua_driver_core::authorization::validate_startup_authorization()?;
-    if cua_driver_core::authorization::configured_permission_mode()
-        .is_ok_and(|mode| mode == cua_driver_core::authorization::PermissionMode::Unrestricted)
+    if std::env::var_os(cua_driver_core::authorization::PERMISSION_MODE_ENV).is_none()
+        && mode == cua_driver_core::authorization::PermissionMode::Standard
     {
-        eprintln!(
-            "DANGER: Cua Driver is running in unrestricted mode. Runtime approval prompts are disabled; prompt injection or unintended input may act with every capability allowed by the built-in, managed, and user policy ceilings. Use only in a disposable or fully trusted environment."
-        );
+        eprintln!("UnrestrictedDisabled: managed startup configuration forces standard permission mode (default: unrestricted)");
+    } else {
+        eprintln!("Permission mode: {} (default: unrestricted; runtime approvals disabled in unrestricted mode)", mode.as_str());
     }
     Ok(())
 }

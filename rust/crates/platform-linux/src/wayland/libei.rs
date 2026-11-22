@@ -26,7 +26,7 @@
 //!
 //! Persistence: ashpd `PersistMode::ExplicitlyRevoked` keeps the user's consent
 //! until they revoke it in desktop settings. The restore token is stored via
-//! [`super::portal::RestoreToken::RemoteDesktopInput`] and reused across
+//! [`super::portal::RestoreToken::Desktop`] and reused across
 //! daemon restarts.
 //!
 //! Coordinates: ei_pointer_absolute takes desktop-layout positions that must
@@ -45,7 +45,6 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 use xkbcommon::xkb;
 
 use super::kwin_keystate::{lock_keys, LockKeys};
-use super::portal::RestoreToken;
 use super::text_keys::{
     chromium_receives, find_key, modifier_chords, refused, text_sym, with_line_feeds, xkb1, Xkb1,
     EVDEV_OFFSET,
@@ -172,7 +171,7 @@ fn tx() -> anyhow::Result<&'static Sender<Cmd>> {
 /// How long a caller waits for the worker to take up a command. A portal consent
 /// dialog can hold it that long.
 const REPLY_WAIT: Duration = Duration::from_secs(20);
-const NOT_READY: &str = "libei input backend did not become ready within 20s; the desktop portal may be waiting for Remote Desktop consent or its EIS session may be wedged";
+const NOT_READY: &str = "libei input backend did not become ready before the deadline; the desktop portal may be waiting for Remote Desktop consent or its EIS session may be wedged";
 
 fn wait_for_reply(rx: Receiver<anyhow::Result<()>>) -> anyhow::Result<()> {
     rx.recv_timeout(REPLY_WAIT).map_err(|error| match error {
@@ -280,7 +279,9 @@ fn wait_until_ready(interface: &'static str) -> anyhow::Result<()> {
             reply: tx_r,
         })
         .map_err(|e| anyhow::anyhow!("libei worker channel closed: {e}"))?;
-    wait_for_reply(rx_r)
+    // Initial consent may take up to 60s, plus bounded setup and EIS calls.
+    rx_r.recv_timeout(Duration::from_secs(90))
+        .map_err(|error| anyhow::anyhow!("{NOT_READY}: {error}"))?
 }
 
 /// Negotiate a resumed absolute-pointer device without emitting input.
@@ -504,31 +505,9 @@ pub fn shutdown() {
 // the negotiated input region. It runs a calloop event loop that handles
 // both the EIS protocol and the inbound command channel.
 
-/// Owns the resources that must outlive a single libei call so the portal
-/// RemoteDesktop + EIS session stays alive for the whole worker-thread lifetime.
-///
-/// GNOME/Mutter (and KDE) tie the RemoteDesktop session — and therefore the
-/// handed-off EIS fd — to the D-Bus connection that created it. The previous
-/// code dropped the ashpd proxy/session (and the tokio runtime backing their
-/// zbus connection) at the end of `open_eis_context`, before the calloop loop
-/// even started, so the session died immediately on those compositors (#2105).
-/// Holding these for the worker's lifetime keeps the connection — and the
-/// session — open. The direct `$LIBEI_SOCKET` fast path has no portal
-/// session, so it carries `None`.
-#[allow(dead_code)] // fields are keep-alive only; never read
-enum PortalKeepAlive {
-    None,
-    Portal {
-        _rt: tokio::runtime::Runtime,
-        _proxy: ashpd::desktop::remote_desktop::RemoteDesktop,
-        _session: ashpd::desktop::Session<ashpd::desktop::remote_desktop::RemoteDesktop>,
-    },
-}
-
 fn worker(rx: Receiver<Cmd>) -> anyhow::Result<()> {
-    // Phase 1 — acquire an EIS context (plus, on the portal path, a keep-alive
-    // that owns the ashpd RemoteDesktop session + its tokio runtime).
-    let (context, _portal_keepalive) =
+    // The daemon-wide portal owner keeps the combined session alive.
+    let context =
         open_eis_context().map_err(|e| anyhow::anyhow!("failed to obtain EIS connection: {e}"))?;
 
     // Phase 2 — handshake. The reis API requires we call context.handshake()
@@ -539,100 +518,21 @@ fn worker(rx: Receiver<Cmd>) -> anyhow::Result<()> {
     // Phase 3 — run the calloop event loop. We use a calloop Generic source
     // wrapping the ei::Context's underlying socket so the loop wakes up on
     // EIS messages. The command channel is polled at the top of each loop
-    // iteration. `_portal_keepalive` stays bound until this fn returns — i.e.
-    // across the entire loop — so the portal session is never dropped early (#2105).
+    // iteration. The shared portal owner outlives this worker.
     run_calloop(context, rx)
 }
 
 /// Open the EIS context. Fast path: `$LIBEI_SOCKET` supplied by the environment.
 /// Fallback: ashpd portal RemoteDesktop handshake.
-fn open_eis_context() -> anyhow::Result<(reis::ei::Context, PortalKeepAlive)> {
+fn open_eis_context() -> anyhow::Result<reis::ei::Context> {
     if let Some(ctx) = reis::ei::Context::connect_to_env()
         .map_err(|e| anyhow::anyhow!("env ei socket open failed: {e}"))?
     {
-        // Direct $LIBEI_SOCKET fast path: no portal session to keep alive.
-        return Ok((ctx, PortalKeepAlive::None));
+        return Ok(ctx);
     }
-
-    // Portal RemoteDesktop fallback.
-    use ashpd::desktop::{
-        remote_desktop::{
-            ConnectToEISOptions, DeviceType, RemoteDesktop, SelectDevicesOptions, StartOptions,
-        },
-        CreateSessionOptions, PersistMode,
-    };
-    use ashpd::enumflags2::BitFlags;
-    use std::os::unix::net::UnixStream;
-
-    // A multi-threaded runtime (1 worker) so the zbus connection backing the
-    // RemoteDesktop session keeps being driven after this fn returns. The
-    // session must stay live for the whole worker lifetime (#2105); a
-    // current-thread runtime would freeze the connection the moment we stop
-    // calling `block_on`, and GNOME/KDE would tear the session down.
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-        .map_err(|e| anyhow::anyhow!("failed to build tokio runtime for ashpd: {e}"))?;
-
-    let (fd, proxy, session) = rt.block_on(async {
-        let connection = super::portal::fresh_session_connection().await?;
-        let proxy = RemoteDesktop::with_connection(connection)
-            .await
-            .map_err(|e| anyhow::anyhow!("portal RemoteDesktop proxy unreachable: {e}. Install xdg-desktop-portal-gnome / xdg-desktop-portal-kde."))?;
-        let session = proxy
-            .create_session(CreateSessionOptions::default())
-            .await
-            .map_err(|e| anyhow::anyhow!("portal create_session failed: {e}"))?;
-
-        let mut select_opts = SelectDevicesOptions::default()
-            .set_devices(BitFlags::<DeviceType>::from(DeviceType::Keyboard) | DeviceType::Pointer)
-            .set_persist_mode(PersistMode::ExplicitlyRevoked);
-        if let Some(tok) = RestoreToken::RemoteDesktopInput.read() {
-            select_opts = select_opts.set_restore_token(Some(tok.as_str()));
-        }
-
-        proxy
-            .select_devices(&session, select_opts)
-            .await
-            .map_err(|e| anyhow::anyhow!("portal select_devices failed: {e}"))?
-            .response()
-            .map_err(|e| anyhow::anyhow!("portal select_devices response error: {e}"))?;
-
-        let started = proxy
-            .start(&session, None, StartOptions::default())
-            .await
-            .map_err(|e| anyhow::anyhow!("portal start failed: {e}"))?
-            .response()
-            .map_err(|e| anyhow::anyhow!("portal start response error (user denied?): {e}"))?;
-
-        // Best-effort persist of the restore_token. Without this, every
-        // process restart re-prompts the user for consent — with it, ashpd
-        // 0.13's explicitly-revoked mode and the stored token together
-        // skip the dialog for the lifetime of the persistence grant
-        // until the user explicitly revokes the grant in desktop settings.
-        if let Some(tok) = started.restore_token() {
-            let _ = RestoreToken::RemoteDesktopInput.write(tok);
-        }
-
-        let fd = proxy
-            .connect_to_eis(&session, ConnectToEISOptions::default())
-            .await
-            .map_err(|e| anyhow::anyhow!("portal connect_to_eis failed: {e}"))?;
-        anyhow::Ok((fd, proxy, session))
-    })?;
-
-    let stream = UnixStream::from(fd);
-    let ctx = reis::ei::Context::new(stream)
-        .map_err(|e| anyhow::anyhow!("reis ei::Context::new failed: {e}"))?;
-    Ok((
-        ctx,
-        PortalKeepAlive::Portal {
-            _rt: rt,
-            _proxy: proxy,
-            _session: session,
-        },
-    ))
+    let fd = super::portal_desktop::connect_to_eis()?;
+    reis::ei::Context::new(std::os::unix::net::UnixStream::from(fd))
+        .map_err(|e| anyhow::anyhow!("reis ei::Context::new failed: {e}"))
 }
 
 // ── calloop dispatch ────────────────────────────────────────────────────

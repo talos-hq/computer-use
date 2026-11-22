@@ -33,6 +33,8 @@ pub(crate) use niri::AimedPoint;
 pub mod overlay;
 pub mod persistent_vptr;
 pub(crate) mod portal;
+#[cfg(feature = "portal-input")]
+pub(crate) mod portal_desktop;
 pub mod portal_screenshot;
 mod primary_seat;
 #[cfg(any(feature = "portal-input", test))]
@@ -1418,6 +1420,11 @@ fn crop_png_to_rect(
 ///    after which the cascade continues.
 /// 6. X11: existing root-window path.
 pub fn screenshot_display_dispatch() -> anyhow::Result<Vec<u8>> {
+    #[cfg(feature = "portal-capture")]
+    if is_wayland() && portal_desktop::is_started() {
+        return portal_screencast::screenshot_from_shared_stream()?
+            .ok_or_else(|| anyhow::anyhow!("shared portal session lost its monitor stream"));
+    }
     if niri::is_session() {
         return niri_display_capture().map(|capture| capture.png);
     }
@@ -1470,7 +1477,7 @@ pub fn screenshot_display_dispatch() -> anyhow::Result<Vec<u8>> {
         }
         // Tier 5: xdg-desktop-portal (GNOME, KDE, COSMIC fallback), then X11.
         return portal_or_x11(
-            portal_screenshot::screenshot_via_portal,
+            desktop_portal_screenshot,
             crate::capture::screenshot_display_bytes_x11,
         );
     }
@@ -1558,6 +1565,17 @@ fn kwin_workspace_capture(
     capture()
         .inspect_err(|e| tracing::debug!("KWin workspace capture unavailable: {e:#}"))
         .ok()
+}
+
+/// Prefer the shared monitor node; a dead stream must never trigger another
+/// permission dialog. Only an unavailable RemoteDesktop portal permits fallback.
+fn desktop_portal_screenshot() -> anyhow::Result<Option<Vec<u8>>> {
+    #[cfg(feature = "portal-capture")]
+    {
+        return portal_screencast::screenshot_from_shared_stream();
+    }
+    #[cfg(not(feature = "portal-capture"))]
+    portal_screenshot::screenshot_via_portal()
 }
 
 /// The cascade tail: the portal tier, then the X11 root window. A portal

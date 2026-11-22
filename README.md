@@ -152,29 +152,45 @@ security boundary, release gates, and later NVIDIA OpenShell integration.
 
 ## Permission modes
 
-`standard` is the promptless default for normal automation. `bounded` admits
-only the tools and resources in a reviewed manifest. `unrestricted` requires
-`--dangerously-bypass-approvals`.
+`unrestricted` is the default with no flags or environment variables. Driver
+approval prompts are disabled for desktop input, screenshots/recording, clipboard,
+files, process termination, history, and existing browser profiles. No
+`--dangerously-bypass-approvals` acknowledgement is required; that flag remains a
+compatibility alias. Automation has the permissions of the account running it.
 
-The mode belongs to the process that owns the runtime and is fixed at launch:
-`cua-driver serve` takes the flags, while `cua-driver mcp` and embedding hosts
-use the matching `CUA_DRIVER_PERMISSION_MODE`,
-`CUA_DRIVER_CAPABILITY_MANIFEST_FILE`, and
-`CUA_DRIVER_CAPABILITY_MANIFEST_APPROVED` variables. Choose it before starting
-the daemon; a running daemon must be restarted to change it.
+Opt into upstream restrictions with `computer-use serve --permission-mode standard`
+or `CUA_DRIVER_PERMISSION_MODE=standard`. Existing-profile attachment in standard
+mode requires `--grant existing-profile` at daemon startup or an embedding
+`DriverAuthorizationHost`. `bounded` requires a reviewed capability manifest and
+`--approve-capability-manifest`. Explicit policies and manifests still narrow
+access in every mode. `CUA_DRIVER_DISABLE_UNRESTRICTED=1` forces the default to
+standard; explicitly requesting unrestricted then fails with `UnrestrictedDisabled`.
+`doctor`, `status`, and help report the effective mode and unrestricted default.
+Restart the daemon to change its mode.
 
-Attaching to an existing logged-in Chromium profile remains explicit:
+On Linux Wayland, ordinary builds include portal input and capture. The daemon
+lazily creates one RemoteDesktop session, selects keyboard and pointer devices,
+attaches ScreenCast monitor sources to that same session, and calls Start once.
+Input uses ConnectToEIS; screenshots grab a PipeWire frame and recordings read the
+same monitor node. Stopping a recording leaves the daemon's session alive. A
+single restore token in `$XDG_CONFIG_HOME/cua-driver/desktop-session.token` (normally
+`~/.config/cua-driver/desktop-session.token`) requests persistence until explicitly
+revoked. The old input/video tokens are ignored, so upgrading can require one new
+dialog. Persistence depends on the desktop portal honouring restore tokens; a
+revoked or expired grant needs approval again.
 
-```bash
-cua-driver mcp --grant existing-profile
-```
+A denied or unanswered dialog times out after 60 seconds and is remembered until
+the daemon restarts, so repeated calls do not open additional dialogs. Native
+compositor capture can avoid portals entirely. When the combined portal cannot
+be created, the legacy Screenshot portal remains a compatibility fallback; some
+desktops, including KDE, can prompt for each fallback screenshot. A failed frame
+from an established session never falls back to another consent dialog.
 
-An embedding application can instead provide `DriverAuthorizationHost`, and a
-bounded runtime can declare `kind: existing_profile` in its manifest. Cua
-Driver does not render its own authorization modal or banner.
-
-See the hosted [permission mode
-reference](https://cua.ai/docs/cua-driver/guides/permissions).
+macOS Accessibility and Screen Recording are separate TCC grants and cannot be
+merged into one OS prompt. Windows UAC/secure-desktop grants and browser-owned
+remote-debugging or keychain dialogs also remain controlled by those applications
+and the OS. The unrestricted default removes the driver's authorization prompts
+on all platforms; it cannot remove independent OS/application permission dialogs.
 
 ## Repository Layout
 

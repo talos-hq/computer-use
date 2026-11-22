@@ -707,6 +707,19 @@ fn assemble(
     report.push(probe_install_layout());
     report.push(probe_home_dir(home));
     report.push(probe_telemetry(telemetry));
+    let authorization = cua_driver_core::authorization::status_json();
+    let mode = authorization["permission_mode"]
+        .as_str()
+        .unwrap_or("invalid");
+    let message = format!("effective mode: {mode}; default: unrestricted");
+    let probe = if let Some(reason) = authorization["permission_mode_override_reason"].as_str() {
+        Probe::warn("authorization", format!("{message}; {reason}"))
+    } else if authorization["permission_mode_valid"] == false {
+        Probe::err("authorization", message)
+    } else {
+        Probe::ok("authorization", message)
+    };
+    report.push(probe.with_detail(authorization.to_string()));
     platform(&mut report);
     report
 }

@@ -388,11 +388,12 @@ fn select_session_mode(
         "envelope sessions with a host capability manifest are unsupported"
     );
     match requested {
+        None if host == PermissionMode::Unrestricted => Ok(SessionPermissionMode::Unrestricted),
         None | Some("standard") => Ok(SessionPermissionMode::Standard),
         Some("unrestricted") => {
             anyhow::ensure!(
                 host == PermissionMode::Unrestricted,
-                "unrestricted envelope sessions require an acknowledged unrestricted host"
+                "unrestricted envelope sessions require an unrestricted host"
             );
             Ok(SessionPermissionMode::Unrestricted)
         }
@@ -459,16 +460,23 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn envelope_mode_never_implicitly_inherits_unrestricted() {
+    fn envelope_default_inherits_host_and_explicit_standard_is_preserved() {
         use cua_driver_core::authorization::PermissionMode as Host;
+        use cua_driver_sdk::SessionPermissionMode as Session;
+        assert_eq!(
+            select_session_mode(None, Host::Unrestricted, false).unwrap(),
+            Session::Unrestricted
+        );
         for host in [Host::Standard, Host::Bounded, Host::Unrestricted] {
-            for requested in [None, Some("standard")] {
-                assert_eq!(
-                    select_session_mode(requested, host, false).unwrap(),
-                    cua_driver_sdk::SessionPermissionMode::Standard
-                );
-            }
+            assert_eq!(
+                select_session_mode(Some("standard"), host, false).unwrap(),
+                Session::Standard
+            );
         }
+        assert_eq!(
+            select_session_mode(None, Host::Standard, false).unwrap(),
+            Session::Standard
+        );
     }
 
     #[test]
@@ -495,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn envelope_startup_mode_requires_explicit_acknowledgement() {
+    fn envelope_startup_mode_needs_no_acknowledgement() {
         const CHILD: &str = "CUA_TEST_ENVELOPE_MODE_CHILD";
         if let Ok(expected) = std::env::var(CHILD) {
             let selected = configured_session_mode();
@@ -524,9 +532,15 @@ mod tests {
         // Startup mode is process-cached; each case must get a fresh process.
         for (requested, host, acknowledged, manifest, expected) in [
             (None, "standard", false, false, "standard"),
-            (None, "unrestricted", true, false, "standard"),
+            (None, "unrestricted", true, false, "unrestricted"),
             (Some("unrestricted"), "standard", false, false, "error"),
-            (Some("unrestricted"), "unrestricted", false, false, "error"),
+            (
+                Some("unrestricted"),
+                "unrestricted",
+                false,
+                false,
+                "unrestricted",
+            ),
             (
                 Some("unrestricted"),
                 "unrestricted",
@@ -552,12 +566,15 @@ mod tests {
             command
                 .args([
                     "--exact",
-                    "driver_service_http::tests::envelope_startup_mode_requires_explicit_acknowledgement",
+                    "driver_service_http::tests::envelope_startup_mode_needs_no_acknowledgement",
                     "--nocapture",
                 ])
                 .env(CHILD, expected)
                 .env("CUA_DRIVER_PERMISSION_MODE", host)
-                .env("CUA_DRIVER_DANGEROUSLY_BYPASS_APPROVALS", if acknowledged { "1" } else { "0" })
+                .env(
+                    "CUA_DRIVER_DANGEROUSLY_BYPASS_APPROVALS",
+                    if acknowledged { "1" } else { "0" },
+                )
                 .env_remove("CUA_DRIVER_ENVELOPE_PERMISSION_MODE")
                 .env_remove("CUA_DRIVER_CAPABILITY_MANIFEST_FILE")
                 .env_remove("CUA_DRIVER_SESSION_POLICY_FILE");

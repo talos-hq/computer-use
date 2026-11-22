@@ -147,6 +147,7 @@ portal-input = [
 # KDE/KWin and other compositors without wlr-screencopy) keeps its newer
 # system-header requirement and remains enabled by Nix/modern desktop builds.
 portal-capture = [
+    "portal-input",
     "ashpd/screencast",
     "dep:pipewire-sys",
     "dep:libspa",

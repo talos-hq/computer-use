@@ -42,6 +42,26 @@ tokio::task_local! {
     static DESKTOP_LEASE: DesktopLease;
 }
 
+/// Exercise platform/browser adapters under an explicit mode without mutating
+/// process-cached environment configuration shared by concurrent tests.
+#[cfg(test)]
+pub(crate) async fn with_test_permission_mode<F: std::future::Future>(
+    mode: crate::authorization::PermissionMode,
+    action: F,
+) -> F::Output {
+    let ceiling = crate::session_authorization::SessionModeCeiling::for_trusted_sessions(
+        [mode],
+        mode == crate::authorization::PermissionMode::Unrestricted,
+        Duration::from_secs(60),
+        Duration::from_secs(30),
+    )
+    .unwrap();
+    let context = crate::session_authorization::SessionAuthorizationRegistry::with_ceiling(ceiling)
+        .compatibility_context(mode, None)
+        .unwrap();
+    DISPATCH_AUTHORIZATION_CONTEXT.scope(context, action).await
+}
+
 /// Return the immutable authorization context bound to the current dispatch.
 ///
 /// Resource adapters use this instead of consulting process-global

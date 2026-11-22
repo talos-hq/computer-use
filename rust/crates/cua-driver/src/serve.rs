@@ -3514,7 +3514,7 @@ mod gate_tests {
         assert_eq!(PROBE_INVOCATIONS.load(Ordering::SeqCst), 1);
         PROBE_INVOCATIONS.store(0, Ordering::SeqCst);
 
-        // Unique temp socket — never the default socket / CuaDriver.app daemon.
+        // Unique temp socket — never the default socket / ComputerUse.app daemon.
         let socket = format!(
             "/tmp/cua-driver-gate-test-{}-{}.sock",
             std::process::id(),

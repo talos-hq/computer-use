@@ -3,7 +3,7 @@
 
 //! Whether an update replaced this process's executable on disk.
 //!
-//! An in-place update moves the old `CuaDriver.app` aside (or deletes it) and
+//! An in-place update moves the old `ComputerUse.app` aside (or deletes it) and
 //! puts the new bundle at the same path. A `serve` daemon that started from
 //! the old bundle keeps running its old image, but macOS judges its TCC
 //! grants against an install that is gone: permission probes report

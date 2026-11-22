@@ -573,7 +573,7 @@ mod tests {
         let home = Path::new("/Users/u");
         assert_eq!(
             marker_path_for(
-                Path::new("/Applications/CuaDriver.app/Contents/MacOS/cua-driver"),
+                Path::new("/Applications/ComputerUse.app/Contents/MacOS/computer-use"),
                 home
             ),
             Some(PathBuf::from(

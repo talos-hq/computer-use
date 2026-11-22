@@ -39,7 +39,7 @@ pub const MACOS_CHECK_NAMES: &[&str] = &[
 /// The canonical bundle identifier whose TCC grants matter for the
 /// daemon. The `bundle_identity` check passes when the running process
 /// reports this id.
-pub const CANONICAL_BUNDLE_ID: &str = "com.trycua.driver";
+pub const CANONICAL_BUNDLE_ID: &str = "com.taloshq.computer-use";
 
 pub struct MacosHealthProvider;
 
@@ -79,7 +79,7 @@ impl HealthCheckProvider for MacosHealthProvider {
 /// True when this daemon is neither embedded in a host app nor running from
 /// inside an app bundle: a bare binary relaunches itself disclaimed, as its
 /// own responsible process with no usable WindowServer connection (CUA-1777).
-/// Any `.app/Contents/MacOS/` executable counts as bundled: CuaDriver.app and
+/// Any `.app/Contents/MacOS/` executable counts as bundled: ComputerUse.app and
 /// hosts that link the driver in-process, such as Cua Spacesd.app (the macOS
 /// Space image's daemon). A real invalid connection is still caught by the
 /// runtime 1002 detector, which `windowserver_connection_entry` checks first.
@@ -111,7 +111,7 @@ fn windowserver_connection_entry(unbundled: bool, invalid_seen: bool) -> CheckEn
     if unbundled {
         return CheckEntry::fail(
             NAME_WINDOWSERVER_CONNECTION,
-            "Running unbundled (outside CuaDriver.app): the daemon is its own responsible process and its no-raise focus steps are expected to fail with 1002.",
+            "Running unbundled (outside ComputerUse.app): the daemon is its own responsible process and its no-raise focus steps are expected to fail with 1002.",
             hint,
         );
     }
@@ -182,7 +182,7 @@ fn standalone_bundle_identity(bid: Option<String>, exe: String) -> CheckEntry {
     };
     let hint = "This bundle check does not identify the app or executable macOS attributes \
                 this process's permission request to. For standalone CuaDriver, start the \
-                daemon inside CuaDriver.app with `cua-driver permissions grant` and \
+                daemon inside ComputerUse.app with `cua-driver permissions grant` and \
                 connect via `cua-driver mcp`. For an embedded or linked driver, use the \
                 host's launch and permission setup instead.";
 
@@ -256,8 +256,8 @@ fn accessibility_check(granted: bool, bundle_identifier: Option<String>) -> Chec
         "Accessibility is NOT granted for this process.",
         "Grant Accessibility to the app or executable macOS attributes this process's \
          permission request to in System Settings → Privacy & Security → Accessibility. \
-         For standalone CuaDriver, use CuaDriver.app. For an embedded or linked driver, \
-         follow the host's permission setup; a grant to a separate CuaDriver.app does not \
+         For standalone CuaDriver, use ComputerUse.app. For an embedded or linked driver, \
+         follow the host's permission setup; a grant to a separate ComputerUse.app does not \
          verify this process's access.",
     )
     .with_data(data)
@@ -281,8 +281,8 @@ fn screen_recording_check(granted: bool, bundle_identifier: Option<String>) -> C
         "Screen Recording is NOT granted for this process.",
         "Grant Screen Recording to the app or executable macOS attributes this process's \
          permission request to in System Settings → Privacy & Security → Screen Recording. \
-         For standalone CuaDriver, use CuaDriver.app. For an embedded or linked driver, \
-         follow the host's permission setup; a grant to a separate CuaDriver.app does not \
+         For standalone CuaDriver, use ComputerUse.app. For an embedded or linked driver, \
+         follow the host's permission setup; a grant to a separate ComputerUse.app does not \
          verify this process's access.",
     )
     .with_data(data)
@@ -352,7 +352,7 @@ fn bundle_identifier(bundle: &core_foundation::bundle::CFBundle) -> Option<Strin
 
 /// Read the running process's `CFBundleIdentifier` via CoreFoundation.
 /// Returns `None` when the process has no associated bundle (e.g.
-/// running the bare binary outside `CuaDriver.app`).
+/// running the bare binary outside `ComputerUse.app`).
 pub(crate) fn current_bundle_identifier() -> Option<String> {
     use core_foundation::base::TCFType;
     use core_foundation::bundle::{CFBundle, CFBundleGetMainBundle};
@@ -425,7 +425,7 @@ mod tests {
         assert!(!is_unbundled(true, "/usr/local/bin/cua-driver"));
         assert!(!is_unbundled(
             false,
-            "/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
+            "/Applications/ComputerUse.app/Contents/MacOS/computer-use"
         ));
         // A host app that links the driver in-process (the macOS image's daemon).
         assert!(!is_unbundled(
@@ -577,7 +577,7 @@ mod tests {
         let _guard = env_lock();
         let embedded = swap_env(cua_driver_core::EMBEDDED_ENV, None);
 
-        // The Rust test binary runs outside CuaDriver.app, so its
+        // The Rust test binary runs outside ComputerUse.app, so its
         // bundle id is either absent or not com.trycua.driver. Either
         // way the documented fail-mode shape applies: message + hint
         // + data + (when bid is present) bundle_identifier surfaced.

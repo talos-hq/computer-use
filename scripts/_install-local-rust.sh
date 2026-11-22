@@ -385,12 +385,12 @@ echo ""
 # every rebuild — so permissions silently reset and never appear cleanly
 # under System Settings. Mirror the production path (install.sh) + the CD
 # bundle-assembly step: drop the freshly built binary into the checked-in
-# CuaDriverBundle skeleton, install the bundle to /Applications, and point
+# ComputerUseBundle skeleton, install the bundle to /Applications, and point
 # the visible bin at the binary INSIDE the bundle. Linux/Windows have no
 # .app concept and keep the bare-binary symlink below.
 APP_DEST="/Applications/CuaDriverLocal.app"
 if [ "$OS" = "Darwin" ]; then
-    SKELETON="$REPO_ROOT/scripts/CuaDriverBundle"
+    SKELETON="$REPO_ROOT/scripts/ComputerUseBundle"
     if [ ! -d "$SKELETON/Contents" ]; then
         echo "${RED}Error: bundle skeleton missing at $SKELETON${NORMAL}" >&2
         exit 1

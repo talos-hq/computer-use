@@ -49,8 +49,8 @@ pub async fn request_from_launchservices_host(
 fn driver_bundle_id_for_executable(executable: &str) -> Option<&'static str> {
     if executable.contains("/CuaDriverLocal.app/Contents/MacOS/") {
         Some("com.trycua.driver.local")
-    } else if executable.contains("/CuaDriver.app/Contents/MacOS/") {
-        Some("com.trycua.driver")
+    } else if executable.contains("/ComputerUse.app/Contents/MacOS/") {
+        Some("com.taloshq.computer-use")
     } else {
         None
     }
@@ -75,7 +75,7 @@ fn direct_capture_evidence_store_for_identity(
     let bundle_id = driver_bundle_id_for_executable(executable)?;
     let state_directory = match bundle_id {
         "com.trycua.driver.local" => ".cua-driver-local",
-        "com.trycua.driver" => ".cua-driver",
+        "com.taloshq.computer-use" => ".cua-driver",
         _ => return None,
     };
     Some(DirectCaptureEvidenceStore::new(
@@ -347,7 +347,7 @@ fn caller_note(identity: TccIdentity, responsible_label: &str, exe: &str) -> Str
 /// macOS attributes Accessibility / Screen-Recording to the *responsible
 /// process*, not the executable path. The kernel names it, so the answer
 /// reflects:
-///   - the **CuaDriver daemon** (`com.trycua.driver`) when this process is
+///   - the **CuaDriver daemon** (`com.taloshq.computer-use`) when this process is
 ///     its own responsible process and runs from the app bundle.
 ///   - the **app that started it** when another process is responsible:
 ///     an embedding host, or a caller whose process tree spawned the daemon.
@@ -394,7 +394,7 @@ fn permission_source(
     }
     // Daemon attribution needs both non-spoofable signals: the kernel names
     // this process as its own responsible process, and it runs from inside
-    // the code-signed `CuaDriver.app` bundle. Fail closed to "caller" when
+    // the code-signed `ComputerUse.app` bundle. Fail closed to "caller" when
     // either is missing.
     let driver_bundle_id = driver_bundle_id_for_executable(&exe);
     let identity = tcc_identity(driver_bundle_id, pid, responsible);
@@ -616,7 +616,7 @@ impl Tool for CheckPermissionsTool {
         if is_caller {
             summary.push_str(
                 "\nℹ️  Status reflects the launching app's TCC identity, not the CuaDriver \
-                 daemon (com.trycua.driver). See `source` for details.",
+                 daemon (com.taloshq.computer-use). See `source` for details.",
             );
         }
 
@@ -666,7 +666,7 @@ mod tests {
 
     fn release_evidence_store(home: &Path) -> DirectCaptureEvidenceStore {
         direct_capture_evidence_store_for_identity(
-            "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
+            "/Applications/ComputerUse.app/Contents/MacOS/computer-use",
             home,
             Some("driver-daemon"),
         )
@@ -677,9 +677,9 @@ mod tests {
     fn recognizes_release_and_local_driver_bundles() {
         assert_eq!(
             driver_bundle_id_for_executable(
-                "/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
+                "/Applications/ComputerUse.app/Contents/MacOS/computer-use"
             ),
-            Some("com.trycua.driver")
+            Some("com.taloshq.computer-use")
         );
         assert_eq!(
             driver_bundle_id_for_executable(
@@ -718,7 +718,7 @@ mod tests {
         .is_none());
         for attribution in [Some("caller"), Some("host"), None] {
             assert!(direct_capture_evidence_store_for_identity(
-                "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
+                "/Applications/ComputerUse.app/Contents/MacOS/computer-use",
                 &home,
                 attribution,
             )
@@ -896,10 +896,10 @@ mod tests {
     /// with ppid 1, but macOS still charges it to the host app.
     #[test]
     fn only_its_own_responsible_process_is_the_driver_daemon() {
-        let bundle = Some("com.trycua.driver");
+        let bundle = Some("com.taloshq.computer-use");
         assert_eq!(
             tcc_identity(bundle, 500, Some(500)),
-            TccIdentity::DriverDaemon("com.trycua.driver")
+            TccIdentity::DriverDaemon("com.taloshq.computer-use")
         );
         assert_eq!(
             tcc_identity(bundle, 500, Some(42)),
@@ -921,7 +921,7 @@ mod tests {
         let note = caller_note(
             TccIdentity::ResponsibleApp(42),
             "com.example.host",
-            "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
+            "/Applications/ComputerUse.app/Contents/MacOS/computer-use",
         );
         assert!(note.contains("com.example.host"), "{note}");
         assert!(note.contains("cua-driver stop"), "{note}");
@@ -945,7 +945,7 @@ mod tests {
         // The disclaim env var is caller-controlled, so on its own it must not
         // make `check_permissions` claim the booleans reflect the daemon's TCC
         // identity. Daemon attribution additionally requires the binary to live
-        // inside the code-signed `CuaDriver.app` bundle — the test runner does
+        // inside the code-signed `ComputerUse.app` bundle — the test runner does
         // not, so even with the env var present we must fail closed to "caller".
         let _guard = env_lock();
         let name = cua_driver_core::RESPONSIBILITY_DISCLAIMED_ENV;

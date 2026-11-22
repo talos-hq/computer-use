@@ -14,11 +14,11 @@ pub const RELEASE_CLI_NAME: &str = "computer-use";
 pub const LOCAL_CLI_NAME: &str = "cua-driver-local";
 
 #[cfg(target_os = "macos")]
-pub const RELEASE_APP_NAME: &str = "CuaDriver";
+pub const RELEASE_APP_NAME: &str = "ComputerUse";
 #[cfg(target_os = "macos")]
 pub const LOCAL_APP_NAME: &str = "CuaDriverLocal";
 #[cfg(target_os = "macos")]
-pub const RELEASE_BUNDLE_ID: &str = "com.trycua.driver";
+pub const RELEASE_BUNDLE_ID: &str = "com.taloshq.computer-use";
 #[cfg(target_os = "macos")]
 pub const LOCAL_BUNDLE_ID: &str = "com.trycua.driver.local";
 
@@ -107,7 +107,7 @@ pub fn is_executable_inside_cuadriver_app() -> bool {
         .and_then(|path| std::fs::canonicalize(path).ok())
         .is_some_and(|path| {
             path.to_str().is_some_and(|path| {
-                path.contains("/CuaDriver.app/Contents/MacOS/")
+                path.contains("/ComputerUse.app/Contents/MacOS/")
                     || path.contains("/CuaDriverLocal.app/Contents/MacOS/")
             })
         })
@@ -139,7 +139,7 @@ mod tests {
             "/dev/.cua-driver-local/cua-driver-local.exe"
         )));
         assert!(!path_is_local(Path::new(
-            "/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
+            "/Applications/ComputerUse.app/Contents/MacOS/computer-use"
         )));
         assert!(!path_is_local(Path::new("/tmp/cua-driver-local-test")));
     }

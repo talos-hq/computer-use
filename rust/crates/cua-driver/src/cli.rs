@@ -1672,7 +1672,7 @@ fn launch_daemon_with_state_and_wait(
     // so existing launch configurations behave the same across proxy and
     // in-process paths. It currently has no tool-surface effect.
     let status = Cmd::new("/usr/bin/open")
-        // `-n` forces a new instance: CuaDriver.app might already be
+        // `-n` forces a new instance: ComputerUse.app might already be
         // running from a previous MCP session, and without `-n`, `open
         // -a` would re-use it and drop our `--args serve`, leaving no
         // daemon up. `-g` keeps the new instance backgrounded —
@@ -2026,7 +2026,7 @@ where
     let mut daemon = McpDaemonStartup::AlreadyRunning;
     if !already_running {
         // Never replace an embedded host's TCC identity by launching the
-        // standalone CuaDriver.app daemon.
+        // standalone ComputerUse.app daemon.
         if cua_driver_core::embedded_mode() {
             if let Some(on_startup) = on_startup.take() {
                 on_startup(McpDaemonStartup::Unreachable, false);
@@ -2302,7 +2302,7 @@ pub fn build_manifest() -> serde_json::Value {
               "description": "Self-diagnose probes for runtime prerequisites (permissions, accessibility, capture, etc.).",
               "args": [
                   { "name": "--json", "type": "flag", "description": "Machine-readable doctor report." },
-                  { "name": "--fix", "type": "flag", "description": "macOS: make LaunchServices forget every other copy of CuaDriver.app (no files are deleted)." }
+                  { "name": "--fix", "type": "flag", "description": "macOS: make LaunchServices forget every other copy of ComputerUse.app (no files are deleted)." }
               ] },
             { "name": "test",
               "description": "Check a new install end to end: permissions, screen read, pointer, and typing in TextEdit (macOS). Exit 0 when it all works.",
@@ -4253,7 +4253,7 @@ fn launchservices_permission_host(
 }
 
 /// Launch CuaDriver via LaunchServices so the permission prompt attributes to
-/// com.trycua.driver, wait (user-paced) for the daemon to come up — its socket
+/// com.taloshq.computer-use, wait (user-paced) for the daemon to come up — its socket
 /// only appears once the permissions gate passes, i.e. the grant was given —
 /// then report the driver's own status.
 fn run_permissions_grant() {
@@ -4804,7 +4804,7 @@ fn cli_docs_literal() -> serde_json::Value {
             {
                 "name": "mcp",
                 "abstract": "Run the stdio MCP server.",
-                "discussion": "On Windows and Linux, bare cua-driver mcp owns its runtime directly and shuts it down on stdin EOF. On macOS it proxies to CuaDriver.app so desktop permissions retain the app identity. Pass --direct to make the macOS MCP process own the runtime and TCC attribution, or --socket to select an explicit daemon endpoint.",
+                "discussion": "On Windows and Linux, bare cua-driver mcp owns its runtime directly and shuts it down on stdin EOF. On macOS it proxies to ComputerUse.app so desktop permissions retain the app identity. Pass --direct to make the macOS MCP process own the runtime and TCC attribution, or --socket to select an explicit daemon endpoint.",
                 "arguments": no_args,
                 "options": [
                     {"name":"socket","short_name":null,"help":"Select an explicit daemon socket or named-pipe endpoint.","type":"String","default_value":null,"is_optional":true},
@@ -5096,10 +5096,10 @@ fn cli_docs_literal() -> serde_json::Value {
             {
                 "name": "doctor",
                 "abstract": "Run platform-aware diagnostic probes.",
-                "discussion": "Exit code is non-zero when any probe is an error. On macOS it warns about other copies of CuaDriver.app that macOS can launch instead of the installed one, and about permission rows tied to a different path or version.",
+                "discussion": "Exit code is non-zero when any probe is an error. On macOS it warns about other copies of ComputerUse.app that macOS can launch instead of the installed one, and about permission rows tied to a different path or version.",
                 "arguments": no_args,
                 "options": no_options,
-                "flags": [{"name":"json","short_name":null,"help":"Emit the probe report as JSON.","default_value":false},{"name":"fix","short_name":null,"help":"macOS: make LaunchServices forget every other copy of CuaDriver.app. No files are deleted.","default_value":false}],
+                "flags": [{"name":"json","short_name":null,"help":"Emit the probe report as JSON.","default_value":false},{"name":"fix","short_name":null,"help":"macOS: make LaunchServices forget every other copy of ComputerUse.app. No files are deleted.","default_value":false}],
                 "subcommands": no_subcommands
             },
             {
@@ -5282,7 +5282,7 @@ const CLI_EXAMPLES: &[(&str, &[(&str, &str)])] = &[
     ("history delete", &[("cua-driver history delete --yes", "Delete every recorded chunk and its key")]),
     ("permissions", &[("cua-driver permissions", "Report Accessibility and Screen Recording status")]),
     ("permissions status", &[("cua-driver permissions status --json", "Report the grants as JSON")]),
-    ("permissions grant", &[("cua-driver permissions grant", "Request the grants for CuaDriver.app")]),
+    ("permissions grant", &[("cua-driver permissions grant", "Request the grants for ComputerUse.app")]),
     ("connect", &[
         ("cua-driver connect", "Connect every agent found on this computer"),
         ("cua-driver connect --client claude --dry-run", "Show what would change for Claude Code"),
@@ -5463,8 +5463,8 @@ pub fn run_dump_docs_with_type(tools_list: &serde_json::Value, pretty: bool, doc
 ///   - running process identity (path, pid, version)
 ///   - codesign info (cdhash, team-id, authority) via `codesign -dvvv`
 ///   - AX + screen recording TCC status (check_permissions tool)
-///   - install layout (/Applications/CuaDriver.app, ~/.local/bin/cua-driver)
-///   - TCC DB rows for com.trycua.driver (sqlite3, best-effort)
+///   - install layout (/Applications/ComputerUse.app, ~/.local/bin/cua-driver)
+///   - TCC DB rows for com.taloshq.computer-use (sqlite3, best-effort)
 ///   - config + state paths with existence booleans
 pub fn run_diagnose_cmd() {
     #[cfg(target_os = "windows")]
@@ -5625,7 +5625,7 @@ fn diagnose_install_layout_section() -> String {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     let mut lines = vec!["## install layout".to_owned()];
 
-    let app_path = "/Applications/CuaDriver.app";
+    let app_path = "/Applications/ComputerUse.app";
     let app_exists = std::path::Path::new(app_path).exists();
     lines.push(format!("bundle:  {app_path}   exists={app_exists}"));
     if app_exists {
@@ -5667,7 +5667,7 @@ fn diagnose_install_layout_section() -> String {
         }
     }
 
-    let stale = format!("{home}/Applications/CuaDriver.app");
+    let stale = format!("{home}/Applications/ComputerUse.app");
     if std::path::Path::new(&stale).exists() {
         lines.push(format!(
             "stale:   {stale}   \u{2190} old install-local.sh path, consider removing"
@@ -5682,9 +5682,9 @@ fn diagnose_tcc_db_section() -> String {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     let db = format!("{home}/Library/Application Support/com.apple.TCC/TCC.db");
     let sql = "SELECT service, client, client_type, auth_value, auth_reason, \
-               hex(csreq) AS csreq_hex FROM access WHERE client='com.trycua.driver';";
+               hex(csreq) AS csreq_hex FROM access WHERE client='com.taloshq.computer-use';";
 
-    let mut lines = vec!["## tcc database rows for com.trycua.driver".to_owned()];
+    let mut lines = vec!["## tcc database rows for com.taloshq.computer-use".to_owned()];
     lines.push(format!(
         "(reading {db} — best-effort; system TCC DB requires FDA)"
     ));
@@ -6378,7 +6378,7 @@ mod tests {
         };
         #[cfg(target_os = "macos")]
         let launch = daemon_launch_arguments(
-            "/Applications/CuaDriver.app",
+            "/Applications/ComputerUse.app",
             "/tmp/history-test.sock",
             &state,
             true,
@@ -6427,14 +6427,20 @@ mod tests {
     #[test]
     fn daemon_launch_targets_the_exact_bundle_path_not_the_app_name() {
         let launch = daemon_launch_arguments(
-            "/Applications/CuaDriver.app",
+            "/Applications/ComputerUse.app",
             &crate::serve::default_socket_path(),
             &crate::history_runtime::DaemonLaunchState::default(),
             false,
         );
         assert_eq!(
             launch,
-            ["-n", "-g", "/Applications/CuaDriver.app", "--args", "serve"]
+            [
+                "-n",
+                "-g",
+                "/Applications/ComputerUse.app",
+                "--args",
+                "serve"
+            ]
         );
         assert!(!launch.contains(&"-a".to_owned()));
         assert!(!launch.contains(&"CuaDriver".to_owned()));
@@ -6954,7 +6960,7 @@ mod tests {
             "direct_capture_verification": {
                 "source": "permissions_grant",
                 "verified_at": "2026-08-05T09:30:00Z",
-                "bundle_id": "com.trycua.driver"
+                "bundle_id": "com.taloshq.computer-use"
             }
         });
         assert_eq!(

@@ -149,7 +149,7 @@ fn write_json_atomic(path: &Path, value: &PersistedVerification) -> Result<(), S
 mod tests {
     use super::*;
 
-    const RELEASE_BUNDLE_ID: &str = "com.trycua.driver";
+    const RELEASE_BUNDLE_ID: &str = "com.taloshq.computer-use";
     const VERIFIED_AT: i64 = 1_754_352_000;
 
     fn store(path: PathBuf) -> DirectCaptureEvidenceStore {

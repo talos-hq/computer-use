@@ -39,8 +39,9 @@ impl MacosKeychainKeyProvider {
         Ok(format!("com.trycua.{namespace}.computer-history.v1"))
     }
 
-    fn uses_data_protection(namespace: &str) -> bool {
-        namespace == "cua-driver"
+    fn uses_data_protection(_namespace: &str) -> bool {
+        // The Developer ID release uses the login keychain.
+        false
     }
 
     fn lookup_options(service: &str, data_protection: bool) -> PasswordOptions {
@@ -208,7 +209,9 @@ mod tests {
             MacosKeychainKeyProvider::service("cua-driver-local").unwrap()
         );
         assert!(MacosKeychainKeyProvider::service("../escape").is_err());
-        assert!(MacosKeychainKeyProvider::uses_data_protection("cua-driver"));
+        assert!(!MacosKeychainKeyProvider::uses_data_protection(
+            "cua-driver"
+        ));
         assert!(!MacosKeychainKeyProvider::uses_data_protection(
             "cua-driver-local"
         ));

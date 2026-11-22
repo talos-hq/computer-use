@@ -4,7 +4,7 @@
 use std::process::{Command, Output};
 
 fn run(home: &std::path::Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args(args)
         .env("CUA_DRIVER_RS_HOME", home)
         .env("CUA_DRIVER_RS_TELEMETRY_ENABLED", "0")
@@ -36,11 +36,11 @@ fn command_help_prints_the_named_commands_reference() {
         "recording --help printed the top-level help"
     );
     assert!(
-        recording.contains("Usage: cua-driver recording [OPTIONS] [COMMAND]"),
+        recording.contains("Usage: computer-use recording [OPTIONS] [COMMAND]"),
         "{recording}"
     );
     assert!(
-        recording.contains("Without a subcommand, runs cua-driver recording status."),
+        recording.contains("Without a subcommand, runs computer-use recording status."),
         "{recording}"
     );
     for sub in ["start", "stop", "status", "render"] {
@@ -56,7 +56,7 @@ fn command_help_prints_the_named_commands_reference() {
         &["--socket", "/nonexistent.sock", "recording", "render", "-h"],
     );
     assert!(
-        render.contains("Usage: cua-driver recording render [OPTIONS] <input-dir> <out-mp4>"),
+        render.contains("Usage: computer-use recording render [OPTIONS] <input-dir> <out-mp4>"),
         "{render}"
     );
     assert!(render.contains("--scale <number>"), "{render}");
@@ -65,7 +65,7 @@ fn command_help_prints_the_named_commands_reference() {
     // A word that is not a subcommand (here the <output-dir> value) stops the walk.
     let start = help(home.path(), &["recording", "start", "mydir", "--help"]);
     assert!(
-        start.contains("Usage: cua-driver recording start <output-dir>"),
+        start.contains("Usage: computer-use recording start <output-dir>"),
         "{start}"
     );
 
@@ -75,7 +75,7 @@ fn command_help_prints_the_named_commands_reference() {
     // A long-lived command still only prints its help and exits.
     let serve = help(home.path(), &["serve", "--help"]);
     assert!(
-        serve.contains("Usage: cua-driver serve [OPTIONS]"),
+        serve.contains("Usage: computer-use serve [OPTIONS]"),
         "{serve}"
     );
 }

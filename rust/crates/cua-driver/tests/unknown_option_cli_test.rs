@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 const BOUND: Duration = Duration::from_secs(15);
 
 fn driver(home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_cua-driver"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_computer-use"));
     command
         .args(args)
         .stdin(Stdio::null())

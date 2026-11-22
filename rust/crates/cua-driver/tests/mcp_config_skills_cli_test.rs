@@ -42,7 +42,7 @@ impl Sandbox {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+        Command::new(env!("CARGO_BIN_EXE_computer-use"))
             .arg("mcp-config")
             .args(args)
             .stdin(Stdio::null())
@@ -366,7 +366,7 @@ fn deepseek_harness_gets_a_cordis_patch_that_starts_this_driver() {
     let config = &row["config"];
     assert_eq!(config["serverName"], "cua-driver");
     assert_eq!(config["transport"], "stdio");
-    let driver = fs::canonicalize(env!("CARGO_BIN_EXE_cua-driver")).unwrap();
+    let driver = fs::canonicalize(env!("CARGO_BIN_EXE_computer-use")).unwrap();
     let command = config["command"].as_str().expect("command is a string");
     assert_eq!(fs::canonicalize(command).unwrap(), driver);
     assert_eq!(

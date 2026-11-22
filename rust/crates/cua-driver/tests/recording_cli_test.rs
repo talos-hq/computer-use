@@ -10,11 +10,11 @@ use cua_driver_testkit::CliDriver;
 
 #[test]
 fn unknown_recording_subcommand_lists_render_as_render_accepts_it() {
-    let driver = CliDriver::with_binary(env!("CARGO_BIN_EXE_cua-driver"));
+    let driver = CliDriver::with_binary(env!("CARGO_BIN_EXE_computer-use"));
     assert!(driver.available(), "test daemon failed to start");
     let socket = driver.daemon_socket().expect("test daemon socket");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let output = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args(["recording", "bogus", "--socket", socket])
         .output()
         .expect("run cua-driver recording bogus");

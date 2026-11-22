@@ -2096,6 +2096,21 @@ fn grant_worker_paths(
             }
             ledger.merge_grant_tree(root, container, GENERIC_READ | GENERIC_EXECUTE, false)?;
         }
+        for executable in &boundary.executables {
+            if !boundary
+                .readable
+                .iter()
+                .chain(&boundary.writable)
+                .any(|root| executable.starts_with(root))
+            {
+                ledger.merge_grant_tree(
+                    executable,
+                    container,
+                    GENERIC_READ | GENERIC_EXECUTE,
+                    false,
+                )?;
+            }
+        }
         Ok(())
     })();
     match result {

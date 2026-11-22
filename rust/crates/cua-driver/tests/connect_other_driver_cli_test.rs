@@ -38,7 +38,7 @@ fn connect_reports_an_agent_that_uses_the_driver_inside_cua_spaces() {
     std::fs::write(home.join(".claude.json"), &config).unwrap();
 
     let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+        Command::new(env!("CARGO_BIN_EXE_computer-use"))
             .args(args)
             .env("HOME", &home)
             .env("PATH", &bin)

@@ -15,7 +15,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env, fs,
+    fs,
     io::{Cursor, Read},
     path::{Component, Path, PathBuf},
 };
@@ -87,24 +87,27 @@ struct DotLottieAnimation {
 
 fn usage() -> &'static str {
     "Usage:
-  cua-driver cursor-theme validate <source.lottie> [--development]
-  cua-driver cursor-theme build <source.lottie> --output <theme.cua-theme> [--development]
-  cua-driver cursor-theme inspect <theme.cua-theme> [--json]
-  cua-driver cursor-theme preview <theme.cua-theme> --output <directory>
-  cua-driver cursor-theme install <theme.cua-theme>
-  cua-driver cursor-theme list [--json]
-  cua-driver cursor-theme uninstall <theme-id>"
+  computer-use cursor-theme validate <source.lottie> [--development]
+  computer-use cursor-theme build <source.lottie> --output <theme.cua-theme> [--development]
+  computer-use cursor-theme inspect <theme.cua-theme> [--json]
+  computer-use cursor-theme preview <theme.cua-theme> --output <directory>
+  computer-use cursor-theme install <theme.cua-theme>
+  computer-use cursor-theme list [--json]
+  computer-use cursor-theme uninstall <theme-id>"
 }
 
-fn main() {
-    if let Err(error) = run() {
-        eprintln!("cua-driver cursor-theme: {error:#}");
-        std::process::exit(1);
+/// Run the authoring applet with arguments excluding argv[0].
+pub fn run(args: Vec<String>) -> i32 {
+    match run_inner(args) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("computer-use cursor-theme: {error:#}");
+            1
+        }
     }
 }
 
-fn run() -> Result<()> {
-    let args: Vec<String> = env::args().skip(1).collect();
+fn run_inner(args: Vec<String>) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
         bail!(usage());
     };

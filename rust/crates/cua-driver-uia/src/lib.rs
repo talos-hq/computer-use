@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Cua AI, Inc.
 
-//! Testable authorization policy for the Windows UIAccess worker.
+//! Authorization policy and entry point for the Windows UIA applet.
 //!
-//! The production binary carries a `uiAccess=true` manifest and therefore
-//! cannot be launched by an unelevated test runner. Keeping the pure policy in
-//! this library lets CI execute the security checks without weakening the
-//! production manifest.
+//! The multicall executable owns the PE manifest (uiAccess=false). The worker
+//! retains the same authorized-parent and owner-SID checks.
+
+#[cfg(target_os = "windows")]
+mod worker;
+#[cfg(target_os = "windows")]
+pub use worker::run;
 
 #[cfg(target_os = "windows")]
 pub fn authorized_parent_pid_from<I>(args: I) -> anyhow::Result<u32>

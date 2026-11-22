@@ -22,6 +22,7 @@
 
 mod autostart;
 mod broken_pipe;
+mod builtin_perception;
 mod bundle;
 mod check_update_tool;
 mod cli;
@@ -35,6 +36,7 @@ mod extension_manager;
 mod history_runtime;
 mod mcp_envelope;
 mod mcp_http;
+mod multicall;
 mod perception_cli;
 mod private_worker;
 mod proxy;
@@ -222,34 +224,22 @@ fn run_telemetry_command(command: cli::TelemetryCommand) {
 }
 
 fn run_cursor_theme_command(args: &[String]) -> ! {
-    let executable = match std::env::current_exe() {
-        Ok(path) => path,
-        Err(error) => {
-            eprintln!("cua-driver: cannot locate cursor-theme compiler: {error}");
-            std::process::exit(1);
-        }
-    };
-    let binary_name = if cfg!(target_os = "windows") {
-        "cua-cursor-theme.exe"
-    } else {
-        "cua-cursor-theme"
-    };
-    let sidecar = executable
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join(binary_name);
-    let status = match std::process::Command::new(&sidecar).args(args).status() {
-        Ok(status) => status,
+    let status = std::env::current_exe().and_then(|executable| {
+        std::process::Command::new(executable)
+            .args(["applet", "cua-cursor-theme"])
+            .args(args)
+            .status()
+    });
+    match status {
+        Ok(status) => std::process::exit(broken_pipe::shell_exit_code(status)),
         Err(error) => {
             eprintln!(
-                "cua-driver: cursor-theme compiler is unavailable at {}: {error}",
-                sidecar.display()
+                "{}: cannot launch cursor-theme applet: {error}",
+                multicall::driver_name()
             );
-            eprintln!("Reinstall Cua Driver so the matching authoring sidecar is present.");
             std::process::exit(1);
         }
-    };
-    std::process::exit(status.code().unwrap_or(1));
+    }
 }
 
 // ── Public SDK runtime host ──────────────────────────────────────────────
@@ -486,14 +476,25 @@ mod mcp_runtime_selection_tests {
     }
 }
 
+fn main() -> anyhow::Result<()> {
+    if let Some(code) = multicall::dispatch(std::env::args_os().collect())? {
+        std::process::exit(code);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        driver_main();
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    driver_main()
+}
+
 // ── macOS entry-point ─────────────────────────────────────────────────────
 
 #[cfg(target_os = "macos")]
-fn main() {
+fn driver_main() {
     cua_driver_core::build_info::init(env!("CUA_DRIVER_GIT_SHA"));
-    cua_driver_sdk::configure_perception_client_resolver(
-        extension_manager::perception_client_resolver(),
-    );
+    cua_driver_sdk::configure_perception_client_resolver(builtin_perception::resolver());
     if let Some(code) = platform_macos::permissions::gate::run_permission_probe_if_requested() {
         std::process::exit(code);
     }
@@ -939,7 +940,7 @@ fn main() {
 // ── Non-macOS entry-point ─────────────────────────────────────────────────
 
 #[cfg(not(target_os = "macos"))]
-fn main() -> anyhow::Result<()> {
+fn driver_main() -> anyhow::Result<()> {
     cua_driver_core::build_info::init(env!("CUA_DRIVER_GIT_SHA"));
     // An elevated Driver runs shell launches through this executable with a
     // standard-user token (#3607). Checked first so the helper does no other
@@ -950,9 +951,7 @@ fn main() -> anyhow::Result<()> {
     {
         std::process::exit(code);
     }
-    cua_driver_sdk::configure_perception_client_resolver(
-        extension_manager::perception_client_resolver(),
-    );
+    cua_driver_sdk::configure_perception_client_resolver(builtin_perception::resolver());
     if let Some(code) = history_runtime::run_offline_purge_if_requested() {
         std::process::exit(code);
     }

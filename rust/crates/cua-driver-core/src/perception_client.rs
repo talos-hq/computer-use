@@ -53,6 +53,7 @@ pub struct PerceptionWorkerConfig {
     pub warm_worker: Option<WarmWorkerPolicy>,
     pub expected_extension_identity: Option<ExpectedExtensionIdentity>,
     installed: bool,
+    executable_file_only: bool,
     windows_acl_lease_path: Option<PathBuf>,
     #[cfg(test)]
     containment: ContainmentLimits,
@@ -68,10 +69,18 @@ impl PerceptionWorkerConfig {
             warm_worker: None,
             expected_extension_identity: None,
             installed: false,
+            executable_file_only: false,
             windows_acl_lease_path: None,
             #[cfg(test)]
             containment: ContainmentLimits::default(),
         }
+    }
+
+    /// Grant access to this executable file without reading its installation
+    /// directory. Multicall workers pass every asset directory explicitly.
+    pub fn with_executable_file_only(mut self) -> Self {
+        self.executable_file_only = true;
+        self
     }
 
     pub fn with_bounded_reuse(mut self, policy: WarmWorkerPolicy) -> Self {
@@ -128,12 +137,14 @@ impl PerceptionWorkerConfig {
         #[cfg(test)]
         {
             let mut limits = self.containment.clone();
+            limits.executable_file_only = self.executable_file_only;
             limits.windows_acl_lease_path = self.windows_acl_lease_path.clone();
             limits
         }
         #[cfg(not(test))]
         {
             containment::ContainmentLimits {
+                executable_file_only: self.executable_file_only,
                 windows_acl_lease_path: self.windows_acl_lease_path.clone(),
                 ..containment::ContainmentLimits::default()
             }
@@ -310,7 +321,7 @@ impl PerceptionClient {
         let config = self.config.as_ref().ok_or_else(|| {
             error(
                 VisualParseErrorCode::NotInstalled,
-                "the optional cua-perception extension is not installed",
+                "perception assets are unavailable; configure local model-manifest.json and ONNX Runtime (see README)",
                 false,
                 None,
             )
@@ -1366,6 +1377,7 @@ else:
             warm_worker: None,
             expected_extension_identity: None,
             installed: false,
+            executable_file_only: false,
             windows_acl_lease_path: None,
         })
         .unwrap()
@@ -1388,6 +1400,7 @@ else:
             warm_worker: Some(policy),
             expected_extension_identity: None,
             installed: false,
+            executable_file_only: false,
             windows_acl_lease_path: None,
         })
         .unwrap()
@@ -1922,6 +1935,7 @@ write_frame({'protocol':'cua-perception/1','request_id':request['request_id'],'s
             warm_worker: None,
             expected_extension_identity: None,
             installed: false,
+            executable_file_only: false,
             windows_acl_lease_path: None,
         })
         .unwrap();
@@ -2030,6 +2044,7 @@ write_frame({'protocol':'cua-perception/1','request_id':request['request_id'],'s
                 version: "0.1.0".into(),
             }),
             installed: true,
+            executable_file_only: false,
             windows_acl_lease_path: None,
         })
         .unwrap();

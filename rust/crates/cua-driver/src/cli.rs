@@ -594,20 +594,37 @@ pub fn parse_command() -> Command {
     // Handle --version / -V before any other parsing so they are never
     // silently stripped as "bare flags" and swallowed by MCP mode.
     if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("cua-driver {}", env!("CARGO_PKG_VERSION"));
+        println!(
+            "{} {}",
+            crate::multicall::driver_name(),
+            env!("CARGO_PKG_VERSION")
+        );
         std::process::exit(0);
     }
     if args.iter().any(|a| a == "--help" || a == "-h") {
         if let Some(help) = command_help(&args) {
-            print!("{help}");
+            print!("{}", crate::multicall::brand_help(&help));
             std::process::exit(0);
+        }
+        // Keep the legacy spelling for callers invoking the compatibility link.
+        macro_rules! println {
+            () => { std::println!() };
+            ($($arg:tt)*) => { std::println!("{}", crate::multicall::brand_help(&format!($($arg)*))) };
         }
         println!(
             "cua-driver {} — cross-platform computer-use automation driver",
             env!("CARGO_PKG_VERSION")
         );
         println!("Usage: cua-driver [SUBCOMMAND] [OPTIONS]");
-        println!("Subcommands: {}", HELP_SUBCOMMANDS.join(", "));
+        println!(
+            "Subcommands: {}, applet, install-links",
+            HELP_SUBCOMMANDS.join(", ")
+        );
+        println!(
+            "  computer-use applet --list      List built-in applets.
+  computer-use applet <name> [args...]
+  computer-use install-links [--dir DIR]"
+        );
         println!();
         println!("permissions options (macOS):");
         println!("  cua-driver permissions status   Show whether Cua Driver can use your mouse and keyboard (Accessibility)");

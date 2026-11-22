@@ -187,7 +187,7 @@ fn run_inner(args: &[String]) -> Result<(), CliError> {
         captured_at: metadata.captured_at,
     };
 
-    let client = crate::extension_manager::perception_client_for_cli().map_err(|cause| {
+    let client = crate::builtin_perception::client().map_err(|cause| {
         CliError::from(local_visual_error(
             VisualParseErrorCode::ArtifactInvalid,
             cause.to_string(),

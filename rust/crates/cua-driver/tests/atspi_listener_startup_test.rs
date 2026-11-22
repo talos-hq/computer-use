@@ -32,7 +32,7 @@ fn serve_command(
     session_bus_address: &str,
     state: &IsolatedStateRoot,
 ) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_cua-driver"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_computer-use"));
     command
         .args([
             "serve",

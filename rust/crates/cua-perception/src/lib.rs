@@ -8,6 +8,7 @@
 //! this crate never downloads models or runtime binaries. The fixture backend
 //! is an explicit deterministic test mode and never impersonates inference.
 
+pub mod cli;
 mod manifest;
 mod postprocess;
 mod preprocess;

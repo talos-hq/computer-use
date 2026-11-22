@@ -1,4 +1,4 @@
-# cua-driver Rust workspace
+# computer-use Rust workspace
 
 This directory is the standalone Cargo workspace for the driver daemon, platform
 implementations, testkit, and helper crates.
@@ -14,23 +14,29 @@ implementations, testkit, and helper crates.
 | `platform-windows` | Windows UIA, capture, input, overlay, and diagnostics |
 | `platform-linux` | Linux AT-SPI, X11/Wayland, capture, and input support |
 | `cua-driver-testkit` | Test-only helpers for spawning the daemon and parsing responses |
-| `cua-driver-uia` | Windows UIAccess worker |
+| `cua-driver-uia` | Windows UIA library applet (normal process integrity) |
 | `cursor-overlay` | Cross-platform semantic cursor renderer and bounded compiled-theme loader |
-| `cursor-theme-cli` | Short-lived dotLottie validation, compilation, preview, and installation sidecar |
+| `cua-perception` | Manifest-verified ONNX inference worker library/app-let |
+| `cursor-theme-cli` | Short-lived dotLottie validation, compilation, preview, and installation applet |
 
 Platform crates are selected with `cfg(target_os)` from the main driver crate.
 Keep platform-specific behavior inside the matching `platform-<os>` crate.
 
 ## Build
 
+On NixOS, build and test inside the repository root's `nix-shell` with
+`nice -n 10` and `-j 4`; see the root README for the complete command.
+
 ```bash
-cargo build -p cua-driver
-cargo build -p cua-driver --release
+soldr cargo build -p cua-driver
+soldr cargo build -p cua-driver --release
 ```
 
-The Python wrapper and install scripts expect the built binary at
-`target/<profile>/cua-driver` (or `cua-driver.exe` on Windows), unless
-`CUA_DRIVER_BINARY` is set.
+The product is `target/<profile>/computer-use` (`computer-use.exe` on Windows).
+Use `computer-use install-links` as described in the root README. The retained
+upstream Python wrapper and release/source installers still use upstream output
+names and release artifacts; they are legacy tooling, not the fork's supported
+installation path. Their migration is outside this multicall change.
 
 ## Formatting
 
@@ -39,13 +45,13 @@ The supported Rust toolchain and `rustfmt` component are pinned in
 canonical formatting check from this directory:
 
 ```bash
-cargo fmt --all -- --check
+soldr cargo fmt --all -- --check
 ```
 
 To apply formatting, omit `--check`:
 
 ```bash
-cargo fmt --all
+soldr cargo fmt --all
 ```
 
 ## Tests
@@ -53,8 +59,8 @@ cargo fmt --all
 Default tests should be headless and safe for CI:
 
 ```bash
-cargo test -p cua-driver-core
-cargo test -p cua-driver --test protocol_schema_test
+soldr cargo test -p cua-driver-core
+soldr cargo test -p cua-driver --test protocol_schema_test
 ```
 
 GUI and VM-backed tests live in `cua-driver-e2e`, are marked `#[ignore]`, and
@@ -62,9 +68,9 @@ require a built driver, harness apps from `../tests/fixtures/build/`, and a
 real interactive desktop session:
 
 ```bash
-cargo build -p cua-driver
-cargo test -p cua-driver-e2e --test harness_appkit_test -- --ignored --nocapture
-cargo test -p cua-driver-e2e --test harness_wpf_test -- --ignored --nocapture
+soldr cargo build -p cua-driver
+soldr cargo test -p cua-driver-e2e --test harness_appkit_test -- --ignored --nocapture
+soldr cargo test -p cua-driver-e2e --test harness_wpf_test -- --ignored --nocapture
 ```
 
 See `crates/cua-driver-e2e/tests/README.md` for the desktop E2E suites and

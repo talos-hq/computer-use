@@ -7,7 +7,7 @@ use std::process::Command;
 
 fn run(args: &[&str]) -> String {
     let home = tempfile::tempdir().expect("temp home");
-    let output = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let output = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args(args)
         .env("CUA_DRIVER_RS_HOME", home.path())
         .env("CUA_DRIVER_RS_TELEMETRY_ENABLED", "0")
@@ -21,7 +21,7 @@ fn run(args: &[&str]) -> String {
 fn test_command_is_listed_in_help() {
     let help = run(&["--help"]);
     assert!(help.contains("test"), "{help}");
-    assert!(help.contains("cua-driver test [--json]"), "{help}");
+    assert!(help.contains("computer-use test [--json]"), "{help}");
 }
 
 #[test]

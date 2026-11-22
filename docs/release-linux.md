@@ -4,7 +4,7 @@ This is the talos-hq MIT fork of Cua's driver. Telemetry and updates are disable
 input is unrestricted by default. KDE target guards and the shared persistent
 RemoteDesktop + ScreenCast portal session are included.
 
-The x86_64 tarball requires glibc 2.34 or later (Debian 12 / Ubuntu 22.04+).
+The x86_64 and aarch64 tarballs require glibc 2.34 or later (Debian 12 / Ubuntu 22.04+).
 Extract its single directory and run `./computer-use --version` or
 `./computer-use doctor`. The `cua-driver`, `cua-cursor-theme` and `cua-perception`
 names are relative symlinks to the same multicall executable. Keep
@@ -33,7 +33,7 @@ cannot solve that loader requirement.
 
 ## Build and install
 
-From a clean checkout on Linux x86_64:
+From a clean checkout on Linux x86_64 or aarch64:
 
 ```sh
 ./scripts/release-linux.sh              # output: dist/*.tar.gz and *.sha256
@@ -68,8 +68,5 @@ The Nix derivation packages the checksum-pinned prebuilt release and uses
 bare cargo: all compilation remains in the soldr release script. For a local
 archive before publication, pass `--arg src /absolute/path/to/release.tar.gz`.
 
-Only Linux x86_64 is published here. Linux arm64 needs a tested cross toolchain
-and runtime validation; macOS and Windows builds/signing are separate gaps.
-No GitHub Actions workflows are added. Hermes may download this archive, verify
-its SHA-256, flatten the single directory and invoke `cua-driver` as before;
-changing its package URLs/lockfile belongs to a later task.
+The Nix package targets Linux x86_64. The portable archives support native
+Linux builds on x86_64 and aarch64.

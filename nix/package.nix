@@ -1,14 +1,14 @@
 # Prebuilt soldr release: Nix must not invoke an unmanaged Rust compiler.
 { pkgs ? import <nixpkgs> { }, src ? null }:
 let
-  version = "0.57.1";
+  version = "0.57.2";
   runtime = with pkgs; [ libx11 libxi libxtst libxext libxkbcommon pipewire ];
 in pkgs.stdenvNoCC.mkDerivation {
   pname = "computer-use";
   inherit version;
   src = if src != null then src else pkgs.fetchurl {
     url = "https://github.com/talos-hq/computer-use/releases/download/computer-use-v${version}/computer-use-${version}-linux-x86_64.tar.gz";
-    sha256 = "2bacb5aad2e058197070296967c7c713865085d2a13f3125b53a9f252b2b1af4";
+    sha256 = "529857b9ebcb1a22e4b7450f2f7e935e96374df2c60385a9d84115e5e15002e8";
   };
   nativeBuildInputs = [ pkgs.autoPatchelfHook pkgs.makeWrapper ];
   buildInputs = [ pkgs.stdenv.cc.cc.lib ];

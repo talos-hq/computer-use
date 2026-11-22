@@ -215,9 +215,13 @@ jobs:
             lipo "$RUNNER_TEMP/computer-use" -verify_arch arm64 x86_64
             install -m 0755 "$RUNNER_TEMP/computer-use" "arm64/$exe"
             mv arm64/ComputerUse.app package/
+            architectures='["arm64","x86_64"]'
           else
             mv "$ARCH/ComputerUse.app" package/
+            architectures=$(printf '["%s"]' "$ARCH")
           fi
+          # Seal the architecture list to give thin and universal bundles distinct code hashes.
+          plutil -insert ComputerUseArchitectures -json "$architectures" package/ComputerUse.app/Contents/Info.plist
           cp LICENSE.md package/LICENSE
           cp docs/release-macos.md package/README.md
       - name: Import Developer ID certificate
@@ -467,15 +471,22 @@ jobs:
             tar -xzf "computer-use-$VERSION-darwin-$variant.tar.gz" -C "$variant"
             app="$variant/ComputerUse.app"
             main="$app/Contents/MacOS/computer-use"
-            version=$("$main" --version)
-            alias=$("$app/Contents/MacOS/cua-driver" --version)
-            [[ "$version" == "computer-use $VERSION" && "$alias" == "cua-driver $VERSION" ]]
             if [[ "$SIGNED" == true ]]; then
               codesign --verify --deep --strict --verbose=2 "$app"
               codesign -dvv "$app" 2>&1 | grep -Fx 'TeamIdentifier=NCFFSNX26D'
-              spctl -a -vv -t exec "$app"
               xcrun stapler validate "$app"
+              if ! spctl -a -vv -t exec "$app" > "gatekeeper-$variant.log" 2>&1; then
+                cat "gatekeeper-$variant.log"
+                log show --last 2m --style compact \
+                  --predicate 'process == "syspolicyd" AND eventMessage CONTAINS[c] "ComputerUse"' | tail -n 60
+                exit 1
+              fi
+              cat "gatekeeper-$variant.log"
+              grep -Fx 'source=Notarized Developer ID' "gatekeeper-$variant.log"
             fi
+            version=$("$main" --version)
+            alias=$("$app/Contents/MacOS/cua-driver" --version)
+            [[ "$version" == "computer-use $VERSION" && "$alias" == "cua-driver $VERSION" ]]
             "$main" doctor --json > "doctor-$variant.json"
             cat "doctor-$variant.json"
             python3 - "doctor-$variant.json" <<'PYTHON'

@@ -40,16 +40,22 @@ From a clean checkout on Linux x86_64:
 ./scripts/install-local.sh --prefix "$HOME/.local" dist/computer-use-0.57.0-linux-x86_64.tar.gz
 ```
 
+To repackage an already validated soldr build of this source/version, use
+`./scripts/release-linux.sh --from-binary /absolute/path/to/computer-use`.
+This checks its version and applies the same strip, loader and archive steps.
+
 The release script requires Nix, soldr, safe-mktemp and safe-rm on PATH. It uses
 the repository's `nix/release-shell.nix`, a pinned NixOS 22.05 compiler/glibc 2.34
 baseline with current PipeWire headers for full portal capture. Header-only
 pkg-config metadata suppresses PipeWire's unused native link flags; libclang,
 compiler runtime and Cargo's linker are pinned to the baseline. The script invokes
 `nice -n 10 soldr cargo build -j 4 --release` with the lockfile. It strips the
-binary, sets the standard glibc loader, removes build-machine RPATHs, rejects
+binary after using soldr's copy mode to keep cached build outputs writable. It sets
+the standard glibc loader, removes build-machine RPATHs, rejects
 hard-linked desktop libraries, preserves symlinks and writes SHA-256. Rust's
 release profile also strips symbols and uses fat LTO. Build archives stay out
-of git. Normal development still uses `nix-shell` and soldr.
+of git. `CARGO_TARGET_DIR` can select a separate build directory. Normal
+development still uses `nix-shell` and soldr.
 
 `install-local.sh` requires Python 3. It also accepts an unpacked release directory or a built binary;
 without a source it selects the release tree. It installs the executable and

@@ -236,6 +236,8 @@ pub const fn capabilities() -> ContainmentCapabilities {
 /// Explicit, testable resource ceilings applied to the worker process tree.
 #[derive(Clone, Debug)]
 pub struct ContainmentLimits {
+    /// Read/execute only the worker file, without deriving an executable-directory grant.
+    pub executable_file_only: bool,
     /// Memory ceiling in bytes. Linux applies it to each process's virtual
     /// address space, Windows to the Job Object's total committed memory, and
     /// macOS through supervisor sampling. [`capabilities`] reports which.
@@ -277,6 +279,7 @@ pub struct ContainmentLimits {
 impl Default for ContainmentLimits {
     fn default() -> Self {
         Self {
+            executable_file_only: false,
             max_memory_bytes: DEFAULT_MAX_MEMORY_BYTES,
             max_cpu_time: DEFAULT_MAX_CPU_TIME,
             max_processes: DEFAULT_MAX_PROCESSES,
@@ -359,7 +362,9 @@ fn filesystem_boundary(
     #[cfg(test)]
     let mut executables = vec![canonical_file(executable)?];
 
-    readable.push(derived_read_root(executable)?);
+    if !limits.executable_file_only {
+        readable.push(derived_read_root(executable)?);
+    }
     for argument in args {
         let path = Path::new(argument);
         if !path.is_absolute() {
@@ -862,6 +867,41 @@ mod tests {
         assert_eq!(
             collapsed,
             vec![PathBuf::from("/opt/cua"), PathBuf::from("/opt/cuativity")]
+        );
+    }
+
+    #[test]
+    fn executable_file_only_never_grants_the_installation_directory() {
+        #[cfg(unix)]
+        let executable = tempfile::NamedTempFile::new_in("/tmp").unwrap();
+        #[cfg(not(unix))]
+        let executable = tempfile::NamedTempFile::new().unwrap();
+        let working = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        assert!(filesystem_boundary(
+            executable.path(),
+            &[],
+            working.path(),
+            &ContainmentLimits::default(),
+        )
+        .is_err());
+        let boundary = filesystem_boundary(
+            executable.path(),
+            &["applet".into(), "cua-perception".into()],
+            working.path(),
+            &ContainmentLimits {
+                executable_file_only: true,
+                ..ContainmentLimits::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            boundary.readable,
+            vec![working.path().canonicalize().unwrap()]
+        );
+        assert_eq!(
+            boundary.executables,
+            vec![executable.path().canonicalize().unwrap()]
         );
     }
 

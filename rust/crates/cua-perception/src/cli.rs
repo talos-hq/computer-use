@@ -8,20 +8,24 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::{read_frame, write_frame, Response, Worker};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use cua_perception::{read_frame, write_frame, Response, Worker};
 use serde_json::{json, Value};
 
-fn main() {
-    if let Err(error) = start() {
-        eprintln!("cua-perception: {error}");
-        std::process::exit(1);
+/// Run the worker applet with arguments excluding argv[0].
+pub fn run(args: Vec<std::ffi::OsString>) -> i32 {
+    match start(args) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("cua-perception: {error}");
+            1
+        }
     }
 }
 
-fn start() -> Result<(), String> {
-    match parse_startup()? {
-        Startup::Serve(worker) => run(&worker).map_err(|error| error.to_string()),
+fn start(args: Vec<std::ffi::OsString>) -> Result<(), String> {
+    match parse_startup(args)? {
+        Startup::Serve(worker) => serve(&worker).map_err(|error| error.to_string()),
         Startup::Gate(gate, identity) => run_gate(gate, &identity),
     }
 }
@@ -44,8 +48,8 @@ enum Gate {
     MismatchRejection,
 }
 
-fn parse_startup() -> Result<Startup, String> {
-    let mut args = env::args_os().skip(1);
+fn parse_startup(args: Vec<std::ffi::OsString>) -> Result<Startup, String> {
+    let mut args = args.into_iter();
     let first = args.next().ok_or_else(usage)?;
     if first == "--fixture" {
         if args.next().is_some() {
@@ -304,7 +308,7 @@ fn require_success(response: &Value) -> Result<(), String> {
     }
 }
 
-fn run(worker: &Worker) -> io::Result<()> {
+fn serve(worker: &Worker) -> io::Result<()> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut reader = stdin.lock();

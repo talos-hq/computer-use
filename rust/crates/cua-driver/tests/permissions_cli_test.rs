@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 #[test]
 fn permissions_unknown_subcommand_is_a_usage_error() {
     let home = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let output = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args(["permissions", "bogus"])
         .stdin(Stdio::null())
         .env("HOME", home.path())

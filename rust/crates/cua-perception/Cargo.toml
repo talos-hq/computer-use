@@ -8,10 +8,6 @@ repository.workspace = true
 publish = false
 description = "Offline visual perception worker with manifest-verified ONNX Runtime inference"
 
-[[bin]]
-name = "cua-perception"
-path = "src/main.rs"
-
 [dependencies]
 base64.workspace = true
 image.workspace = true

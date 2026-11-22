@@ -6,10 +6,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-[[bin]]
-name = "cua-cursor-theme"
-path = "src/main.rs"
-
 [dependencies]
 anyhow.workspace = true
 cursor-overlay = { path = "../cursor-overlay", features = ["theme-authoring"] }

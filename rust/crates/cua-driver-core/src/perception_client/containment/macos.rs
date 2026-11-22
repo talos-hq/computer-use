@@ -466,7 +466,16 @@ fn build_profile(boundary: &FilesystemBoundary) -> Result<String, VisualParseErr
         .map(|node| format!("  (literal \"{}\")\n", escape(node)))
         .collect();
 
-    push_rule(&mut profile, "file-read*", readable.iter().chain(&devices));
+    let executable_reads = boundary
+        .executables
+        .iter()
+        .map(|path| literal_rule(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    push_rule(
+        &mut profile,
+        "file-read*",
+        readable.iter().chain(&devices).chain(&executable_reads),
+    );
     let executable: Vec<String> = boundary
         .executables
         .iter()

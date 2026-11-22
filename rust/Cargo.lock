@@ -1209,7 +1209,10 @@ dependencies = [
  "cua-driver-core",
  "cua-driver-sdk",
  "cua-driver-testkit",
+ "cua-driver-uia",
+ "cua-perception",
  "cursor-overlay",
+ "cursor-theme-cli",
  "embed-resource",
  "flate2",
  "fs2",
@@ -1381,7 +1384,6 @@ version = "0.56.9"
 dependencies = [
  "anyhow",
  "cua-driver-core",
- "embed-manifest",
  "platform-windows",
  "serde",
  "serde_json",
@@ -1553,12 +1555,6 @@ checksum = "e079f19b08ca6239f47f8ba8509c11cf3ea30095831f7fed61441475edd8c449"
 dependencies = [
  "serde",
 ]
-
-[[package]]
-name = "embed-manifest"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94cdc65b1cf9e871453ce2f86f5aaec24ff2eaa36a1fa3e02e441dddc3613b99"
 
 [[package]]
 name = "embed-resource"

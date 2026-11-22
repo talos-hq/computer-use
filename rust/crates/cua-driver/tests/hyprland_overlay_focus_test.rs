@@ -247,7 +247,7 @@ fn native_overlay_never_maps_an_active_hyprland_client() {
     let focus_events = FocusEvents::subscribe();
     let state = IsolatedStateRoot::new().expect("create isolated driver state root");
     let socket = state.path().join("agent.sock");
-    let binary = env!("CARGO_BIN_EXE_cua-driver");
+    let binary = env!("CARGO_BIN_EXE_computer-use");
     let child = Command::new(binary)
         .args(["serve", "--socket"])
         .arg(&socket)

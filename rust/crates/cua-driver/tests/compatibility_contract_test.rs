@@ -15,7 +15,7 @@ const MCP_FIXTURE: &str = include_str!("../../../../compat-fixtures/mcp.json");
 #[test]
 fn released_cli_help_and_manifest_fields_remain_compatible() {
     let fixture: Value = serde_json::from_str(CLI_FIXTURE).expect("valid CLI fixture");
-    let executable = env!("CARGO_BIN_EXE_cua-driver");
+    let executable = env!("CARGO_BIN_EXE_computer-use");
 
     let help = Command::new(executable)
         .arg("--help")
@@ -91,7 +91,7 @@ fn prime_agent_connection_guidance_uses_the_skill_and_cli_path() {
     // `mcp-config --client` installs the skill pack for that agent by default,
     // so this run gets a throwaway home instead of the developer's own.
     let home = tempfile::tempdir().expect("throwaway home");
-    let output = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let output = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args(["mcp-config", "--client", "prime-agent"])
         .env("HOME", home.path())
         .env("USERPROFILE", home.path())

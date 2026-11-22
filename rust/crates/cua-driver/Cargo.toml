@@ -4,10 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Cross-platform background computer-use automation daemon (MCP server)"
-default-run = "cua-driver"
+default-run = "computer-use"
 
 [[bin]]
-name = "cua-driver"
+name = "computer-use"
 path = "src/main.rs"
 
 [dependencies]
@@ -21,6 +21,8 @@ cua-driver-core = { path = "../cua-driver-core" }
 cua-driver-contract = { path = "../cua-driver-contract" }
 cua-driver-sdk = { path = "../cua-driver-sdk" }
 cursor-overlay = { path = "../cursor-overlay" }
+cursor-theme-cli = { path = "../cursor-theme-cli" }
+cua-perception = { path = "../cua-perception" }
 async-trait = "0.1"
 httparse = "1.10.1"
 base64 = { workspace = true }
@@ -64,6 +66,7 @@ platform-macos = { path = "../platform-macos" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 platform-windows = { path = "../platform-windows" }
+cua-driver-uia = { path = "../cua-driver-uia" }
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",

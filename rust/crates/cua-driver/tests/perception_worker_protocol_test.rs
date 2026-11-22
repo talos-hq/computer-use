@@ -13,8 +13,10 @@ use cua_perception::{
 };
 use serde_json::{json, Value};
 
-const FIXTURE_REQUEST: &str = include_str!("fixtures/parse-request.json");
-const FIXTURE_RESPONSE: &str = include_str!("fixtures/parse-response.json");
+const FIXTURE_REQUEST: &str =
+    include_str!("../../cua-perception/tests/fixtures/parse-request.json");
+const FIXTURE_RESPONSE: &str =
+    include_str!("../../cua-perception/tests/fixtures/parse-response.json");
 
 fn response(payload: impl AsRef<[u8]>) -> Value {
     serde_json::to_value(handle_payload(payload.as_ref())).expect("serialize response")
@@ -350,7 +352,8 @@ fn standalone_binary_reports_oversized_frame_and_terminates() {
 
 #[test]
 fn standalone_binary_requires_an_explicit_backend() {
-    let output = Command::new(env!("CARGO_BIN_EXE_cua-perception"))
+    let output = Command::new(env!("CARGO_BIN_EXE_computer-use"))
+        .args(["applet", "cua-perception"])
         .output()
         .expect("run worker without backend arguments");
     assert!(!output.status.success());
@@ -401,7 +404,8 @@ fn response_for_png_header(width: u32, height: u32) -> Value {
 }
 
 fn run_worker(input: &[u8]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_cua-perception"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_computer-use"))
+        .args(["applet", "cua-perception"])
         .arg("--fixture")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

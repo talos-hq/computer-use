@@ -3,22 +3,10 @@ name = "cua-driver-uia"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Windows uiAccess-elevated worker for cua-driver-rs (Calculator / UWP automation)"
+description = "Windows authorized-parent UIA applet for computer-use"
 
-# Tiny uiAccess-marked binary that hosts the Windows tool registry over a named
-# pipe (\\.\pipe\cua-driver-uia). The main `cua-driver` CLI/MCP binary prefers
-# this pipe on Windows when present, so SendInput / UI Automation calls land in
-# this process (UIAccess integrity → UIPI bypass for UWP apps) instead of the
-# main daemon (Medium integrity → blocked by AppContainer).
-#
-# Background: #1602. Why two binaries: a uiAccess'd PE can only be launched via
-# ShellExecute (AIS auto-elevation path). The MCP/CLI binary must stay
-# CreateProcess-launchable for stdio MCP transports + ad-hoc CLI invocations,
-# so we split the elevation into this dedicated worker.
-
-[[bin]]
-name = "cua-driver-uia"
-path = "src/main.rs"
+# Windows-only library applet. The multicall executable owns the normal
+# uiAccess=false manifest; the former standalone UIAccess PE is no longer built.
 
 [target.'cfg(target_os = "windows")'.dependencies]
 tokio = { workspace = true }
@@ -29,6 +17,3 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 cua-driver-core = { path = "../cua-driver-core" }
 platform-windows = { path = "../platform-windows" }
-
-[target.'cfg(target_os = "windows")'.build-dependencies]
-embed-manifest = "1.4"

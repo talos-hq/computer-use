@@ -3,19 +3,19 @@
 
 use std::fs;
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output};
 
-use flate2::{write::GzEncoder, Compression};
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use serde_json::json;
-use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 fn run(home: &std::path::Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args(args)
         .env("CUA_DRIVER_RS_HOME", home)
+        .env_remove("CUA_PERCEPTION_MANIFEST")
+        .env_remove("CUA_PERCEPTION_RUNTIME")
         .env("CUA_DRIVER_CLI_TELEMETRY_CHILD", "1")
         .output()
         .expect("run cua-driver perception command")
@@ -72,313 +72,17 @@ fn run_parse(home: &std::path::Path, image: &str, capture: &str) -> Output {
     )
 }
 
-fn current_target() -> String {
-    let suffix = if cfg!(target_os = "macos") {
-        "apple-darwin"
-    } else if cfg!(all(target_os = "windows", target_env = "msvc")) {
-        "pc-windows-msvc"
-    } else if cfg!(all(target_os = "linux", target_env = "musl")) {
-        "unknown-linux-musl"
-    } else if cfg!(all(target_os = "linux", target_env = "gnu")) {
-        "unknown-linux-gnu"
-    } else {
-        panic!("unsupported perception CLI test target")
-    };
-    format!("{}-{suffix}", std::env::consts::ARCH)
-}
-
-fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
-fn append(builder: &mut tar::Builder<GzEncoder<fs::File>>, path: &str, bytes: &[u8]) {
-    let mut header = tar::Header::new_gnu();
-    header.set_size(bytes.len() as u64);
-    header.set_mode(0o755);
-    header.set_cksum();
-    builder
-        .append_data(&mut header, path, Cursor::new(bytes))
-        .unwrap();
-}
-
-fn compile_fixture_worker(directory: &Path) -> PathBuf {
-    let source = directory.join("perception-fixture-worker.rs");
-    fs::write(
-        &source,
-        r###"
-use std::io::{self, Read, Write};
-
-fn read_frame() -> String {
-    let mut length = [0_u8; 4];
-    io::stdin().read_exact(&mut length).unwrap();
-    let mut payload = vec![0_u8; u32::from_be_bytes(length) as usize];
-    io::stdin().read_exact(&mut payload).unwrap();
-    String::from_utf8(payload).unwrap()
-}
-
-fn field(payload: &str, name: &str) -> String {
-    let marker = format!("\"{name}\":\"");
-    let tail = &payload[payload.find(&marker).unwrap() + marker.len()..];
-    tail[..tail.find('"').unwrap()].to_owned()
-}
-
-fn write_frame(payload: &str) {
-    let bytes = payload.as_bytes();
-    let mut stdout = io::stdout().lock();
-    stdout.write_all(&(bytes.len() as u32).to_be_bytes()).unwrap();
-    stdout.write_all(bytes).unwrap();
-    stdout.flush().unwrap();
-}
-
-fn argument(name: &str) -> String {
-    let args = std::env::args().collect::<Vec<_>>();
-    let index = args.iter().position(|value| value == name).unwrap();
-    args[index + 1].clone()
-}
-
-fn main() {
-    let extension_id = argument("--extension-id");
-    let extension_version = argument("--extension-version");
-    let identity = format!(
-        r#"{{"extension":{{"id":"{}","version":"{}"}},"backend":"deterministic_fixture","fixture_sha256":"{}"}}"#,
-        extension_id,
-        extension_version,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    );
-
-    let health = read_frame();
-    write_frame(&format!(
-        r#"{{"protocol":"cua-perception/1","request_id":"{}","status":"ok","result":{{"ready":true,"protocol":"cua-perception/1","identity":{}}}}}"#,
-        field(&health, "request_id"), identity
-    ));
-
-    let parse = read_frame();
-    write_frame(&format!(
-        r#"{{"protocol":"cua-perception/1","request_id":"{}","status":"ok","result":{{"runtime":"fixture_only","identity":{},"regions":[{{"id":"fixture-text","kind":"text","bounds":{{"x":0,"y":0,"width":2,"height":1}},"text":"fixture","confidence":0.99,"interactive":false,"reading_order":0}}]}}}}"#,
-        field(&parse, "request_id"), identity
-    ));
-}
-"###,
-    )
-    .unwrap();
-
-    let worker = directory.join(if cfg!(windows) {
-        "cua-perception.exe"
-    } else {
-        "cua-perception"
-    });
-    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    let mut command = Command::new(rustc);
-    command.arg(&source).arg("--edition=2021");
-    if cfg!(target_os = "linux") {
-        // Linux containment cannot expose a host-specific dynamic loader to an installed worker.
-        command.args(["-C", "target-feature=+crt-static"]);
-        if let Some(path) = std::env::var_os("CUA_TEST_GLIBC_STATIC_LIB") {
-            let mut native_path = std::ffi::OsString::from("native=");
-            native_path.push(path);
-            command.arg("-L").arg(native_path);
-        }
-    }
-    let output = command
-        .arg("-o")
-        .arg(&worker)
-        .output()
-        .expect("compile deterministic perception fixture worker");
-    assert!(
-        output.status.success(),
-        "fixture worker compilation failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    worker
-}
-
-fn fixture_extension_archive(directory: &Path) -> PathBuf {
-    let version = "1.0.0";
-    let worker_path = compile_fixture_worker(directory);
-    let worker = fs::read(&worker_path).unwrap();
-    let worker_name = worker_path.file_name().unwrap().to_str().unwrap();
-    let entrypoint = format!("bin/{worker_name}");
-    let runtime_name = if cfg!(target_os = "windows") {
-        "onnxruntime.dll"
-    } else if cfg!(target_os = "macos") {
-        "libonnxruntime.dylib"
-    } else {
-        "libonnxruntime.so"
-    };
-    let runtime = b"fixture-runtime".to_vec();
-    let model = b"fixture-model".to_vec();
-    let dictionary = b"fixture-dictionary".to_vec();
-    let model_manifest = b"{}".to_vec();
-    let notice = b"deterministic fixture notice\n".to_vec();
-    let model_license = b"deterministic fixture model license\n".to_vec();
-    let source = b"deterministic fixture source\n".to_vec();
-    let contract = serde_json::to_vec_pretty(&json!({
-        "$schema": "runtime-contract.schema.json",
-        "schemaVersion": 1,
-        "target": current_target(),
-        "protocolVersion": 1,
-        "worker": {"name": worker_name, "sha256": sha256(&worker)},
-        "runtime": {"name": runtime_name, "sha256": sha256(&runtime)},
-        "modelManifest": {"name": "model-manifest.json", "sha256": sha256(&model_manifest)},
-        "models": [
-            {"name": "icon.onnx", "role": "icon-detect", "sha256": sha256(&model)},
-            {"name": "ocr-det.onnx", "role": "ocr-detect", "sha256": sha256(&model)},
-            {"name": "ocr-rec.onnx", "role": "ocr-recognize", "sha256": sha256(&model)}
-        ],
-        "dictionary": {
-            "name": "dictionary.txt",
-            "role": "ocr-dictionary",
-            "sha256": sha256(&dictionary)
-        },
-        "rejectMismatch": true
-    }))
-    .unwrap();
-    let files = vec![
-        (entrypoint.clone(), worker, true),
-        (
-            "models/model-manifest.json".to_owned(),
-            model_manifest,
-            false,
-        ),
-        (format!("runtime/{runtime_name}"), runtime, false),
-        ("models/icon.onnx".to_owned(), model.clone(), false),
-        ("models/ocr-det.onnx".to_owned(), model.clone(), false),
-        ("models/ocr-rec.onnx".to_owned(), model, false),
-        ("models/dictionary.txt".to_owned(), dictionary, false),
-        ("metadata/runtime-contract.json".to_owned(), contract, false),
-        ("LICENSES/NOTICE.txt".to_owned(), notice, false),
-        ("LICENSES/model.txt".to_owned(), model_license, false),
-        ("SOURCE/fixture.txt".to_owned(), source, false),
-    ];
-    let file_json = files
-        .iter()
-        .map(|(path, bytes, executable)| {
-            json!({"path": path, "sha256": sha256(bytes), "executable": executable})
-        })
-        .collect::<Vec<_>>();
-    let file_hash = |path: &str| {
-        let (_, bytes, _) = files
-            .iter()
-            .find(|(candidate, _, _)| candidate == path)
-            .unwrap();
-        sha256(bytes)
-    };
-    let manifest = serde_json::to_vec_pretty(&json!({
-        "schema_version": 1,
-        "id": "cua-perception",
-        "version": version,
-        "driver_version": format!("={}", env!("CARGO_PKG_VERSION")),
-        "protocol_version": 1,
-        "target": current_target(),
-        "entrypoint": entrypoint,
-        "files": file_json,
-        "models": [{
-            "path": "models/icon.onnx",
-            "revision": "fixture-v1",
-            "original_sha256": file_hash("models/icon.onnx"),
-            "conversion_sha256": file_hash("models/icon.onnx"),
-            "license_file": {"path": "LICENSES/model.txt", "sha256": file_hash("LICENSES/model.txt")}
-        }],
-        "components": [{
-            "name": "cua-perception-fixture",
-            "version": version,
-            "license": "Apache-2.0",
-            "notice": "deterministic CLI integration fixture",
-            "source_uri": "https://github.com/trycua/cua",
-            "source_revision": "integration-fixture",
-            "notice_file": {"path": "LICENSES/NOTICE.txt", "sha256": file_hash("LICENSES/NOTICE.txt")}
-        }],
-        "corresponding_source_file": {"path": "SOURCE/fixture.txt", "sha256": file_hash("SOURCE/fixture.txt")},
-        "license": "Apache-2.0",
-        "source": "https://github.com/trycua/cua",
-        "corresponding_source_uri": "https://github.com/trycua/cua",
-        "corresponding_source_revision": "integration-fixture",
-        "provenance": "deterministic CLI integration fixture",
-        "health_args": [],
-        "self_test_args": []
-    }))
-    .unwrap();
-
-    let archive = directory.join("cua-perception-fixture.tar.gz");
-    let encoder = GzEncoder::new(fs::File::create(&archive).unwrap(), Compression::default());
-    let mut builder = tar::Builder::new(encoder);
-    append(&mut builder, "extension.json", &manifest);
-    for (path, bytes, _) in files {
-        append(&mut builder, &path, &bytes);
-    }
-    builder.finish().unwrap();
-    archive
-}
-
 #[test]
-fn installed_fixture_parses_local_input_without_action_authority() {
+fn installed_extension_executable_is_not_selected() {
     let temp = TempDir::new().unwrap();
-    let archive = fixture_extension_archive(temp.path());
-    let install = run(
-        temp.path(),
-        &[
-            "extension",
-            "install",
-            "cua-perception",
-            "--archive",
-            archive.to_str().unwrap(),
-            "--allow-unsigned-local",
-        ],
-    );
-    assert!(
-        install.status.success(),
-        "extension install failed: {}",
-        String::from_utf8_lossy(&install.stderr)
-    );
-
+    let extension = temp.path().join("extensions/cua-perception");
+    fs::create_dir_all(&extension).unwrap();
+    fs::write(extension.join("active.json"), br#"{"version":"1.0.0"}"#).unwrap();
     let (image, capture) = write_fixture(&temp);
     let output = run_parse(temp.path(), &image, &capture);
-    assert!(
-        output.status.success(),
-        "perception parse failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(output.stderr.is_empty());
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-
-    assert_eq!(value["local_input"]["action_authority"], "none");
-    assert_eq!(value["local_input"]["action_eligible"], false);
-    // Local input paths stay private to the caller.
-    assert!(value["local_input"].get("image_path").is_none());
-    assert!(value["local_input"].get("capture_metadata_path").is_none());
-    assert_eq!(
-        value["local_input"]["snapshot_id"],
-        "snapshot-local-fixture"
-    );
-    let capture_id = value["capture"]["capture_id"].as_str().unwrap();
-    assert!(capture_id.starts_with("local_png_"));
-    assert!(!capture_id.starts_with("capture_"));
-    assert_eq!(value["capture"]["source"]["kind"], "window");
-    assert_eq!(value["capture"]["source"]["pid"], 123);
-    assert_eq!(value["capture"]["source"]["window_id"], 456);
-    assert_eq!(value["capture"]["screenshot"]["width"], 2);
-    assert_eq!(value["capture"]["screenshot"]["height"], 1);
-    assert_eq!(value["capture"]["screenshot"]["mime_type"], "image/png");
-    assert_eq!(
-        value["capture"]["screenshot"]["sha256"],
-        value["local_input"]["sha256"]
-    );
-    assert!(value["capture"]["screenshot"]["reference"]
-        .as_str()
-        .unwrap()
-        .starts_with("local-png-sha256:"));
-    assert_eq!(value["parser"]["extension_id"], "cua-perception");
-    assert_eq!(value["parser"]["extension_version"], "1.0.0");
-    assert_eq!(value["parser"]["backend"], "deterministic_fixture");
-    assert_eq!(value["parser"]["runtime"], "fixture_only");
-    assert_eq!(value["regions"][0]["id"], "fixture-text");
-    assert_eq!(value["regions"][0]["kind"], "text");
-    assert_eq!(value["regions"][0]["text"], "fixture");
-    assert_eq!(
-        value["regions"][0]["bounds"],
-        json!({"x": 0, "y": 0, "width": 2, "height": 1})
-    );
+    let error = parse_error(&output);
+    assert_eq!(error["error"]["code"], "artifact_invalid");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("missing perception model manifest"));
 }
 
 #[test]
@@ -411,11 +115,11 @@ fn help_documents_local_parse_as_non_actionable() {
 }
 
 #[test]
-fn valid_local_input_without_extension_returns_not_installed() {
+fn valid_local_input_without_assets_reports_missing_manifest() {
     let temp = TempDir::new().unwrap();
     let (image, capture) = write_fixture(&temp);
     let output = run_parse(temp.path(), &image, &capture);
-    assert_eq!(parse_error(&output)["error"]["code"], "not_installed");
+    assert_eq!(parse_error(&output)["error"]["code"], "artifact_invalid");
     assert!(!temp.path().join("extensions").exists());
 }
 

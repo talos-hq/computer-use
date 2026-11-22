@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-pub const RELEASE_CLI_NAME: &str = "cua-driver";
+pub const RELEASE_CLI_NAME: &str = "computer-use";
 pub const LOCAL_CLI_NAME: &str = "cua-driver-local";
 
 #[cfg(target_os = "macos")]

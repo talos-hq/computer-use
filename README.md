@@ -1,60 +1,121 @@
-# Cua Driver
+# computer-use
 
-Background computer-use driver for any agents. Speaks MCP over stdio; drives native macOS apps without stealing focus.
+Standalone computer-use automation driver: one executable with argv[0] multicall
+applets. This is a hard fork of `trycua/cua`'s `libs/cua-driver`, MIT licensed,
+at snapshot `e50137d` (v0.56.9). Internal crate names, socket paths,
+`CUA_DRIVER_*` variables, and `~/.cua-driver` remain compatible. Telemetry,
+the upstream updater, and `connect` remain disabled.
 
-See [MCP protocol and skills](docs/mcp-protocol-and-skills.md) for the modern
-stdio profile, legacy compatibility, bundled skill resources, and HTTP limits.
+## Build and install
 
-## Optional visual perception (frozen: no new work)
+On NixOS, from the repository root:
 
-The default MIT-licensed Driver works without model artifacts. An explicitly
-installed `cua-perception` extension can parse one retained native window or
-desktop screenshot into model-neutral text and icon regions. Capture and input
-authority remain in Driver, and a region-derived pixel click must carry the
-same one-use `capture_id` as the observation.
-
-See the [extension and runtime contract](docs/perception-extension.md) for
-installation, failure, capture, and action boundaries.
-
-> [!WARNING]
-> The extension is not MIT licensed. Its OmniParser icon detector is
-> AGPL-3.0-only. Installing the extension does not change the Driver's MIT
-> license. However, redistributing the extension, or offering it to users over a
-> network, can require you to provide the AGPL corresponding source. If your
-> organization does not accept AGPL components, do not install the extension.
-> Read the [third-party notices and precautions](docs/perception-third-party-notices.md)
-> before you install, redistribute, or host it.
-
-For offline inspection of an existing PNG, the CLI also provides a local-only
-mode:
-
-```bash
-cua-driver perception parse --image /tmp/window.png --capture /tmp/capture.json --json
+```sh
+nix-shell --run 'cd rust && nice -n 10 soldr cargo build -j 4 -p cua-driver --features portal-libei'
 ```
 
-This mode never registers the file as a Driver capture and its output cannot
-authorize a Driver action. Its required JSON mode returns failures as
-`{"ok":false,"error":{"code":"...","message":"...","retryable":false}}`;
-see the extension contract for the stable codes.
+For an uninstalled debug binary, run inside `nix-shell` with the X11 libraries
+on the loader path:
 
-**[Documentation](https://cua.ai/docs/cua-driver)** - Installation, guides, and API reference.
-
-## Get Cua Driver
-
-**Get Cua Driver with Cua Spaces (recommended on a Mac).** Cua Spaces for Mac
-(macOS 26 or later) carries Cua Driver, runs it in the background, keeps it up
-to date and connects Claude Code and Codex to it. Download it from
-[cua.ai/download](https://cua.ai/download). Permissions are granted to Cua Spaces,
-and its Cua Driver page shows whether Cua Driver is running, with **Repair** and
-**Test now**. See [how the install works](https://cua.ai/docs/cua-driver/guides/cua-spaces).
-
-**Install Cua Driver on its own.** For Windows, Linux, older macOS, or if you
-don't want Cua Spaces:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://cua.ai/driver/install.sh)"   # macOS and Linux
-irm https://cua.ai/driver/install.ps1 | iex                       # Windows (PowerShell)
+```sh
+export LD_LIBRARY_PATH=$(pkg-config --variable=libdir x11):$(pkg-config --variable=libdir xi):$(pkg-config --variable=libdir xtst):$(pkg-config --variable=libdir xext):$(pkg-config --variable=libdir xkbcommon):$LD_LIBRARY_PATH
 ```
+
+The product is `rust/target/debug/computer-use` (use `--release` for a release
+build). Put that executable in your installation directory, then run:
+
+```sh
+computer-use install-links                 # next to the resolved executable
+computer-use install-links --dir ~/.local/bin
+computer-use applet --list
+```
+
+Use this build plus `install-links` for this fork. Retained upstream
+release/source installer scripts and language-package builders target upstream
+artifact names and releases; they have not been migrated to distribute this
+fork. Do not use those scripts to install `computer-use`.
+
+The link helper creates absolute symlinks to the running executable, is
+idempotent, and refuses to overwrite other files or links. On Windows it creates
+`.exe` symlinks and requires Developer Mode or permission to create symlinks.
+If linking is unavailable, invoke an applet explicitly:
+
+```sh
+computer-use applet cua-cursor-theme --help
+computer-use applet cua-perception --manifest /path/model-manifest.json \
+  --onnx-runtime-library /path/libonnxruntime.so \
+  --extension-id cua-perception --extension-version 0.56.9
+```
+
+| Invocation basename (also accepts `.exe`) | Behavior |
+| --- | --- |
+| `computer-use`, `cua-driver`, or an unknown basename | Driver CLI / MCP server |
+| `cua-cursor-theme`, `computer-use-cursor-theme` | Cursor-theme authoring CLI |
+| `cua-perception`, `computer-use-perception` | Perception worker |
+| `cua-driver-uia` (Windows only) | UIA worker, requiring `--authorized-parent-pid` |
+
+`computer-use applet <name> [args...]` accepts the auxiliary basenames above,
+plus `cursor-theme` and `perception` as short names. `install-links` installs all
+listed aliases. Existing Hermes commands such as `cua-driver mcp` keep using the
+driver CLI. The `cua-driver` link retains the legacy help/version spelling;
+`computer-use --version` prints the new product name.
+
+The KWin C++ plugin in `kwin-target-helper/`, GNOME Shell extension in
+`wayland-helper/`, `libcua_driver_sdk`, and UniFFI/node bindings are unchanged.
+They are plugins/libraries, not separate applet executables. Contract/bindgen
+programs remain developer tools, outside the shipped executable.
+
+The Windows UIA code and its authorization checks are linked only on Windows.
+A single executable has one PE manifest: `computer-use` retains the driver's
+`uiAccess=false` manifest so stdio MCP and normal process launches work. The
+UIA applet therefore does **not** retain the old separate helper's UIAccess
+integrity / UIPI bypass. It has no public forwarding route today; enabling
+UIAccess elevation is outside this change. Windows and macOS need native
+validation; this change is validated on Linux.
+
+## Local visual perception assets
+
+The driver launches `current_exe()` with `applet cua-perception`; it never
+selects an installed extension's worker or automatically downloads code/models.
+The existing signed/local extension administration code is retained for a
+reviewable diff, but its active pointer, catalog, and Ed25519 trust root are
+not used by the built-in perception resolver. Installing an old extension does
+not configure the built-in worker.
+
+Real inference requires local assets that are **not included in this repository
+or the executable**. Defaults are under `~/.cua-driver/perception/` (or
+`$CUA_DRIVER_RS_HOME/perception/`):
+
+- `model-manifest.json`, a completed manifest based on
+  `rust/crates/cua-perception/models/model-manifest.template.json`; its target,
+  runtime version and library SHA-256 must match the actual platform library.
+- `artifacts/omniparser-icon-detect-1280-opset17.onnx` (OmniParser v2 detector).
+- `artifacts/ppocrv5-mobile-det.onnx` (PPOCRv5 detection model).
+- `artifacts/ppocrv5-mobile-rec-en.onnx` (English recognition model).
+- `artifacts/ppocrv5-mobile-rec-en-inference.yml` (recognition dictionary).
+- `runtime/libonnxruntime.so`, `runtime/libonnxruntime.dylib`, or
+  `runtime/onnxruntime.dll`, plus that runtime's dependent shared libraries.
+  The template pins ONNX Runtime **1.26.0**; `ort` uses `load-dynamic` and the
+  worker checks the runtime version and hashes before inference.
+
+For real inference, the installed executable's native dependencies must also
+resolve without environment overrides: the contained worker clears inherited
+environment variables, including `LD_LIBRARY_PATH`. A raw Nix debug build may
+need loader-path packaging before it can run inference in that sandbox.
+
+Artifact paths are relative to the manifest, with hashes verified by the worker.
+`CUA_PERCEPTION_MANIFEST` overrides the manifest path; the existing
+`CUA_PERCEPTION_RUNTIME` overrides the runtime library path. Set these before
+starting the driver. Missing assets produce an error; the driver never
+substitutes fixture detections. `applet cua-perception --fixture` is an explicit
+deterministic protocol-test backend only. Health/self-test gate flags locate
+assets beside the executable (or via `CUA_PERCEPTION_RUNTIME`); use the explicit
+`--manifest ... --onnx-runtime-library ...` form for externally stored assets.
+
+See the checked-in [model ledger](rust/crates/cua-perception/models/MODEL_LEDGER.md),
+[licenses and notices](rust/crates/cua-perception/models/THIRD_PARTY_NOTICES.md),
+and [source offer](rust/crates/cua-perception/models/SOURCE_OFFER.md). No model
+acquisition, export, or inference-quality validation is claimed by this PR.
 
 ## Integration surfaces
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Cua AI, Inc.
 
-// cua-driver-uia: Windows uiAccess-elevated tool worker.
+// cua-driver-uia: Windows authorized-parent UIA tool worker.
 //
 // Listens on \\.\pipe\cua-driver-uia for line-delimited JSON requests with the
 // same shape as cua-driver's daemon pipe (\\.\pipe\cua-driver). This is a
@@ -19,12 +19,6 @@
 // The protocol is intentionally byte-identical to cua-driver/serve.rs for a
 // future authorized parent-daemon forwarding path. No public client route is
 // exposed while that forwarding path is unavailable.
-
-#[cfg(not(target_os = "windows"))]
-fn main() {
-    eprintln!("cua-driver-uia: Windows-only. (this binary is a no-op on non-Windows hosts.)");
-    std::process::exit(0);
-}
 
 #[cfg(target_os = "windows")]
 use serde::{Deserialize, Serialize};
@@ -267,11 +261,6 @@ fn current_user_pipe_sddl(sid: &str) -> String {
 }
 
 #[cfg(target_os = "windows")]
-fn authorized_parent_pid_from_args() -> anyhow::Result<u32> {
-    cua_driver_uia::authorized_parent_pid_from(std::env::args().skip(1))
-}
-
-#[cfg(target_os = "windows")]
 unsafe fn exit_when_authorized_parent_exits(parent_pid: u32) -> anyhow::Result<()> {
     #[link(name = "kernel32")]
     extern "system" {
@@ -303,7 +292,7 @@ unsafe fn exit_when_authorized_parent_exits(parent_pid: u32) -> anyhow::Result<(
 }
 
 #[cfg(target_os = "windows")]
-fn main() -> anyhow::Result<()> {
+pub fn run(args: Vec<String>) -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -312,7 +301,7 @@ fn main() -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let authorized_parent_pid = authorized_parent_pid_from_args()?;
+    let authorized_parent_pid = crate::authorized_parent_pid_from(args)?;
     unsafe { exit_when_authorized_parent_exits(authorized_parent_pid)? };
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -355,7 +344,7 @@ async fn async_main(authorized_parent_pid: u32) -> anyhow::Result<()> {
         let client_identity = unsafe {
             named_pipe_client_identity(server.as_raw_handle().cast::<std::ffi::c_void>())
         };
-        if !cua_driver_uia::client_identity_is_authorized(
+        if !crate::client_identity_is_authorized(
             client_identity
                 .as_ref()
                 .map(|(pid, sid)| (*pid, sid.as_str())),

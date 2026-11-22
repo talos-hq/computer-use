@@ -34,7 +34,7 @@ fn missing_socket() -> (String, Option<tempfile::TempDir>) {
 #[test]
 fn cli_call_does_not_execute_without_daemon() {
     let (socket, _directory) = missing_socket();
-    let output = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let output = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args(["call", "list_apps", "--socket", &socket])
         .output()
         .expect("run cua-driver call");
@@ -50,7 +50,7 @@ fn cli_call_does_not_execute_without_daemon() {
 #[test]
 fn embedded_mcp_does_not_fall_back_without_daemon() {
     let (socket, _directory) = missing_socket();
-    let output = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let output = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args(["mcp", "--embedded", "--socket", &socket])
         .env("CUA_DRIVER_RS_TELEMETRY_ENABLED", "false")
         .output()
@@ -67,7 +67,7 @@ fn embedded_mcp_does_not_fall_back_without_daemon() {
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn default_mcp_owns_a_runtime_without_a_daemon() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .arg("mcp")
         .env("CUA_DRIVER_RS_TELEMETRY_ENABLED", "false")
         .stdin(std::process::Stdio::piped())
@@ -105,7 +105,7 @@ fn default_mcp_owns_a_runtime_without_a_daemon() {
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn direct_mcp_rejects_admin_disabled_unrestricted_mode_before_requests() {
-    let output = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let output = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .arg("mcp")
         .env("CUA_DRIVER_PERMISSION_MODE", "unrestricted")
         .env("CUA_DRIVER_DANGEROUSLY_BYPASS_APPROVALS", "1")
@@ -129,7 +129,7 @@ fn direct_mcp_rejects_admin_disabled_unrestricted_mode_before_requests() {
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn direct_mcp_refuses_startup_when_configured_policy_path_is_missing() {
-    let output = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let output = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .arg("mcp")
         .env("CUA_DRIVER_POLICY_FILE", "/nonexistent/cua-policy.yaml")
         .env("CUA_DRIVER_RS_TELEMETRY_ENABLED", "false")
@@ -150,7 +150,7 @@ fn direct_mcp_refuses_startup_when_configured_policy_path_is_missing() {
 
 #[test]
 fn embedded_mcp_without_private_endpoint_fails_closed() {
-    let output = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let output = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args(["mcp", "--embedded"])
         .env("CUA_DRIVER_RS_TELEMETRY_ENABLED", "false")
         .output()
@@ -193,7 +193,7 @@ fn named_session_survives_across_one_shot_cli_calls() {
     );
     assert_eq!(state.structured()["session"], session);
 
-    let sessions = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let sessions = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args([
             "sessions",
             "list",
@@ -215,7 +215,7 @@ fn named_session_survives_across_one_shot_cli_calls() {
     let ended = driver.call("end_session", serde_json::json!({"session": session}));
     assert!(!ended.is_error(), "end failed: {}", ended.text());
 
-    let sessions = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let sessions = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args([
             "sessions",
             "list",
@@ -248,7 +248,7 @@ fn cli_call_strips_a_utf8_bom_from_piped_stdin_arguments() {
         .expect("test daemon socket")
         .to_owned();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args(["call", "start_session", "--socket", &socket])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -352,7 +352,7 @@ fn revoke_cli_ends_the_exact_live_session() {
     );
     assert!(!started.is_error(), "start failed: {}", started.text());
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
+    let output = Command::new(env!("CARGO_BIN_EXE_computer-use"))
         .args([
             "revoke",
             "--session",

@@ -14,7 +14,7 @@ fn bundled_driver(root: &std::path::Path) -> std::path::PathBuf {
     let helpers = root.join("Cua Spaces.app/Contents/Helpers");
     std::fs::create_dir_all(&helpers).unwrap();
     let driver = helpers.join("cua-driver");
-    std::fs::copy(env!("CARGO_BIN_EXE_cua-driver"), &driver).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_computer-use"), &driver).unwrap();
     driver
 }
 
@@ -68,7 +68,7 @@ fn a_driver_inside_another_app_names_that_app_and_one_outside_any_app_is_unmanag
     let helpers = root.path().join("Other.app/Contents/Helpers");
     std::fs::create_dir_all(&helpers).unwrap();
     let hosted = helpers.join("cua-driver");
-    std::fs::copy(env!("CARGO_BIN_EXE_cua-driver"), &hosted).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_computer-use"), &hosted).unwrap();
     let output = run(&hosted, root.path(), &["channel", "set", "nightly"]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -78,7 +78,7 @@ fn a_driver_inside_another_app_names_that_app_and_one_outside_any_app_is_unmanag
     );
 
     let plain = root.path().join("cua-driver");
-    std::fs::copy(env!("CARGO_BIN_EXE_cua-driver"), &plain).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_computer-use"), &plain).unwrap();
     let output = run(&plain, root.path(), &["channel", "set", "stable"]);
     assert!(output.status.success(), "{output:?}");
     assert!(root.path().join("release-channel").exists());

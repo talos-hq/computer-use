@@ -33,7 +33,8 @@ strip --strip-unneeded "$bundle/computer-use"
 # Standard loader on glibc distros; NixOS supports it with programs.nix-ld.enable.
 # The Nix package patches this to its own interpreter, without needing nix-ld.
 patchelf --set-interpreter "$interpreter" --remove-rpath "$bundle/computer-use"
-if readelf -d "$bundle/computer-use" | grep -E 'NEEDED.*(libX11|libXi[.]|libXtst|libXext|libxkbcommon|libpipewire)' ; then
+dynamic=$(readelf -d "$bundle/computer-use")
+if grep -E 'NEEDED.*(libX11|libXi[.]|libXtst|libXext|libxkbcommon|libpipewire)' <<< "$dynamic"; then
     echo 'Unexpected hard-linked desktop library' >&2
     exit 1
 fi

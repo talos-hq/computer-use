@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)][string] $Archive
 )
 $ErrorActionPreference = 'Stop'
-$stage = New-Item -ItemType Directory -Path ([IO.Path]::Combine([IO.Path]::GetTempPath(), [guid]::NewGuid()))
+$stage = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $stage | Out-Null
 try {
     Copy-Item -LiteralPath $Binary -Destination "$stage/computer-use.exe"
     Copy-Item -LiteralPath $Binary -Destination "$stage/cua-driver.exe"

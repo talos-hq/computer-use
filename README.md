@@ -184,7 +184,11 @@ the daemon restarts, so repeated calls do not open additional dialogs. Native
 compositor capture can avoid portals entirely. When the combined portal cannot
 be created, the legacy Screenshot portal remains a compatibility fallback; some
 desktops, including KDE, can prompt for each fallback screenshot. A failed frame
-from an established session never falls back to another consent dialog.
+from an established session never falls back to another consent dialog. The
+shared capture currently supports a monitor covering the whole desktop action
+frame; it refuses a partial multi-monitor selection instead of stretching its
+image into incorrect desktop coordinates. Portal stream composition remains
+unsupported.
 
 macOS Accessibility and Screen Recording are separate TCC grants and cannot be
 merged into one OS prompt. Windows UAC/secure-desktop grants and browser-owned

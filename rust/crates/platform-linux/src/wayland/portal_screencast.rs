@@ -50,13 +50,47 @@ pub struct ScreencastSession {
 
 impl ScreencastSession {
     pub fn open() -> anyhow::Result<Self> {
-        let (fd, node_id) = super::portal_desktop::pipewire_stream()?;
-        Ok(Self { fd, node_id })
+        let (fd, monitor) = super::portal_desktop::pipewire_stream()?;
+        if let Some(layout) = super::logical_desktop_layout()? {
+            let frame = layout.frame;
+            validate_monitor_geometry(
+                monitor.position,
+                monitor.size,
+                (frame.x, frame.y, frame.width, frame.height),
+                frame.outputs.len(),
+            )?;
+        }
+        Ok(Self {
+            fd,
+            node_id: monitor.node_id,
+        })
     }
 
     pub fn into_stream(self) -> (OwnedFd, u32) {
         (self.fd, self.node_id)
     }
+}
+
+/// A monitor node cannot be stretched to a larger desktop action frame.
+/// Until portal stream composition is supported, fail clearly if the selected
+/// source covers only part of the desktop. Never fall back to another dialog.
+fn validate_monitor_geometry(
+    position: Option<(i32, i32)>,
+    size: Option<(i32, i32)>,
+    desktop: (i32, i32, u32, u32),
+    output_count: usize,
+) -> anyhow::Result<()> {
+    let (x, y, width, height) = desktop;
+    let position_matches = position.is_none_or(|position| position == (x, y));
+    let size_matches = size.is_none_or(|(w, h)| {
+        u32::try_from(w).ok() == Some(width) && u32::try_from(h).ok() == Some(height)
+    });
+    let geometry_known = position.is_some() && size.is_some();
+    anyhow::ensure!(
+        position_matches && size_matches && (geometry_known || output_count == 1),
+        "shared portal monitor does not cover the full desktop layout; multi-monitor portal composition is not supported (source position {position:?}, size {size:?}, desktop {desktop:?})"
+    );
+    Ok(())
 }
 
 /// A screenshot consumes a fresh frame from the shared monitor node. Only a
@@ -842,6 +876,30 @@ pub fn run_frame_stream<S: FrameSink>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_monitor_must_cover_the_desktop_action_frame() {
+        assert!(validate_monitor_geometry(
+            Some((1920, 0)),
+            Some((1920, 1080)),
+            (0, 0, 3840, 1080),
+            2
+        )
+        .is_err());
+        assert!(
+            validate_monitor_geometry(Some((0, 0)), Some((1920, 1080)), (0, 0, 3840, 1080), 2)
+                .is_err()
+        );
+        assert!(validate_monitor_geometry(
+            Some((-1920, 0)),
+            Some((1920, 1080)),
+            (-1920, 0, 1920, 1080),
+            1
+        )
+        .is_ok());
+        assert!(validate_monitor_geometry(None, None, (0, 0, 3840, 1080), 2).is_err());
+        assert!(validate_monitor_geometry(None, None, (0, 0, 1920, 1080), 1).is_ok());
+    }
 
     #[test]
     fn frame_rejects_rows_narrower_than_its_width() {

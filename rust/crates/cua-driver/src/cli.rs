@@ -2145,10 +2145,18 @@ pub fn build_manifest() -> serde_json::Value {
         .and_then(|p| p.to_str().map(str::to_owned))
         .unwrap_or_else(|| "cua-driver".to_owned());
 
+    // Linux's target dependency enables these even without CLI feature flags.
+    #[cfg(target_os = "linux")]
+    let portal_features = (
+        platform_linux::wayland::PORTAL_INPUT_ENABLED,
+        platform_linux::wayland::PORTAL_CAPTURE_ENABLED,
+    );
+    #[cfg(not(target_os = "linux"))]
+    let portal_features = (false, false);
     let (wayland_native, portal_input, portal_capture) = manifest_feature_flags(
         cfg!(target_os = "linux"),
-        cfg!(feature = "portal-input"),
-        cfg!(feature = "portal-capture"),
+        portal_features.0,
+        portal_features.1,
     );
 
     serde_json::json!({
@@ -7142,11 +7150,11 @@ mod tests {
         );
         assert_eq!(
             features.get("portal_input").and_then(|v| v.as_bool()),
-            Some(cfg!(all(target_os = "linux", feature = "portal-input")))
+            Some(cfg!(target_os = "linux"))
         );
         assert_eq!(
             features.get("portal_capture").and_then(|v| v.as_bool()),
-            Some(cfg!(all(target_os = "linux", feature = "portal-capture")))
+            Some(cfg!(target_os = "linux"))
         );
 
         // mcp_invocation — { command: <bin path>, args: ["mcp"] }

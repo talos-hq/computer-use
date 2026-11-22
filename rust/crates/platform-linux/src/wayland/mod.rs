@@ -56,6 +56,8 @@ pub(crate) mod portal_screencast;
 
 /// Whether the GNOME/KDE RemoteDesktop + libei input backend is compiled in.
 pub const PORTAL_INPUT_ENABLED: bool = cfg!(feature = "portal-input");
+/// Whether the PipeWire reader for the shared portal monitor is compiled in.
+pub const PORTAL_CAPTURE_ENABLED: bool = cfg!(feature = "portal-capture");
 
 use cua_driver_core::action_record::ActionTransport;
 use std::collections::{HashMap, HashSet};

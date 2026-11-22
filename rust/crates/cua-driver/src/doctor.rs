@@ -645,6 +645,7 @@ pub fn run(fix: bool) -> Report {
         &crate::telemetry::status(),
         append_platform_probes,
     );
+    report.push(probe_authorization());
     #[cfg(target_os = "macos")]
     append_install_hygiene_probes(&mut report, fix);
     #[cfg(not(target_os = "macos"))]
@@ -697,6 +698,56 @@ fn append_install_hygiene_probes(report: &mut Report, fix: bool) {
 }
 
 /// The cross-platform probes over explicit host inputs, then `platform`'s.
+/// Report the daemon's mode when reachable. Bound the diagnostic independently
+/// of tool-call deadlines; an unresponsive daemon must not hang doctor.
+fn probe_authorization() -> Probe {
+    let socket = crate::serve::default_socket_path();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let _ = std::thread::Builder::new()
+        .name("doctor-authorization".into())
+        .spawn(move || {
+            let request = crate::serve::DaemonRequest {
+                method: "authorization_status".into(),
+                name: None,
+                args: None,
+                session_id: None,
+                observation_origin: Some(crate::serve::ToolObservationOrigin::Direct),
+                client_kind: None,
+            };
+            let status = crate::serve::send_request(&socket, &request)
+                .ok()
+                .and_then(|response| response.result);
+            let _ = tx.send(status);
+        });
+    let daemon_status = rx
+        .recv_timeout(std::time::Duration::from_secs(3))
+        .ok()
+        .flatten();
+    let (authorization, source) = match daemon_status {
+        Some(status) => (status, "running daemon effective mode"),
+        None => (
+            cua_driver_core::authorization::status_json(),
+            "local startup mode (daemon unavailable)",
+        ),
+    };
+    authorization_probe_from(&authorization, source)
+}
+
+fn authorization_probe_from(authorization: &serde_json::Value, source: &str) -> Probe {
+    let mode = authorization["permission_mode"]
+        .as_str()
+        .unwrap_or("invalid");
+    let message = format!("{source}: {mode}; default: unrestricted");
+    let probe = if let Some(reason) = authorization["permission_mode_override_reason"].as_str() {
+        Probe::warn("authorization", format!("{message}; {reason}"))
+    } else if authorization["permission_mode_valid"] == false {
+        Probe::err("authorization", message)
+    } else {
+        Probe::ok("authorization", message)
+    };
+    probe.with_detail(authorization.to_string())
+}
+
 fn assemble(
     home: Option<&Path>,
     telemetry: &crate::telemetry::TelemetryStatus,
@@ -707,19 +758,6 @@ fn assemble(
     report.push(probe_install_layout());
     report.push(probe_home_dir(home));
     report.push(probe_telemetry(telemetry));
-    let authorization = cua_driver_core::authorization::status_json();
-    let mode = authorization["permission_mode"]
-        .as_str()
-        .unwrap_or("invalid");
-    let message = format!("effective mode: {mode}; default: unrestricted");
-    let probe = if let Some(reason) = authorization["permission_mode_override_reason"].as_str() {
-        Probe::warn("authorization", format!("{message}; {reason}"))
-    } else if authorization["permission_mode_valid"] == false {
-        Probe::err("authorization", message)
-    } else {
-        Probe::ok("authorization", message)
-    };
-    report.push(probe.with_detail(authorization.to_string()));
     platform(&mut report);
     report
 }
@@ -727,6 +765,19 @@ fn assemble(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn authorization_probe_reports_effective_daemon_mode_and_managed_override() {
+        let status = serde_json::json!({"permission_mode":"standard", "permission_mode_valid":true,
+            "permission_mode_override_reason":"UnrestrictedDisabled: managed startup configuration forces standard mode"});
+        let probe = authorization_probe_from(&status, "running daemon effective mode");
+        assert_eq!(probe.status, Status::Warn);
+        assert!(probe
+            .message
+            .contains("running daemon effective mode: standard"));
+        assert!(probe.message.contains("default: unrestricted"));
+        assert!(probe.message.contains("UnrestrictedDisabled"));
+    }
 
     #[test]
     fn report_to_text_renders_status_tag_and_message() {

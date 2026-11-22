@@ -12,10 +12,10 @@
 //! Sequence:
 //! 1. `ei::Context::connect_to_env()` — fast path when a compositor or test
 //!    environment already exports `$LIBEI_SOCKET`.
-//! 2. Fallback: ashpd `RemoteDesktop::create_session` →
-//!    `select_devices(KEYBOARD|POINTER)` →
-//!    `start(session, parent)` (user consent dialog the first time) →
-//!    `connect_to_eis()` returns a Unix fd → `ei::Context::new(fd)`.
+//! 2. Fallback: the daemon-wide combined RemoteDesktop/ScreenCast owner
+//!    selects keyboard, pointer and monitor sources, then starts once.
+//!    `connect_to_eis()` on that shared session returns a Unix fd →
+//!    `ei::Context::new(fd)`.
 //! 3. Worker thread runs a calloop event loop on the ei::Context;
 //!    handshake → connection.seat events → seat.bind(capabilities) →
 //!    device.frame + emulate events.

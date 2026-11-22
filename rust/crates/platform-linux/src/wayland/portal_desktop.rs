@@ -41,11 +41,18 @@ impl std::fmt::Display for SessionFailure {
 
 impl std::error::Error for SessionFailure {}
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct MonitorStream {
+    pub node_id: u32,
+    pub position: Option<(i32, i32)>,
+    pub size: Option<(i32, i32)>,
+}
+
 type Reply<T> = mpsc::SyncSender<Result<T, String>>;
 
 enum Command {
     Eis(Reply<OwnedFd>),
-    PipeWire(Reply<(OwnedFd, u32)>),
+    PipeWire(Reply<(OwnedFd, MonitorStream)>),
 }
 
 struct Owner {
@@ -92,7 +99,7 @@ pub(crate) fn connect_to_eis() -> anyhow::Result<OwnedFd> {
     request(Command::Eis)
 }
 
-pub(crate) fn pipewire_stream() -> anyhow::Result<(OwnedFd, u32)> {
+pub(crate) fn pipewire_stream() -> anyhow::Result<(OwnedFd, MonitorStream)> {
     request(Command::PipeWire)
 }
 
@@ -122,7 +129,7 @@ fn run_owner(
             // ScreenCast accepts RemoteDesktop's session handle. Start is called
             // once, via RemoteDesktop, after both selections are attached.
             let sources = SelectSourcesOptions::default()
-                .set_sources(SourceType::Monitor.into())
+                .set_sources(BitFlags::from(SourceType::Monitor))
                 .set_multiple(false)
                 .set_cursor_mode(CursorMode::Embedded);
             cast.select_sources(&session, sources).await?.response()?;
@@ -164,11 +171,12 @@ fn run_owner(
             tracing::warn!("could not persist combined portal restore token: {error:#}");
         }
     }
-    let node_id = selected
-        .streams()
-        .first()
-        .map(|stream| stream.pipe_wire_node_id());
-    tracing::info!(?node_id, devices = ?selected.devices(), "combined portal session started");
+    let monitor = selected.streams().first().map(|stream| MonitorStream {
+        node_id: stream.pipe_wire_node_id(),
+        position: stream.position(),
+        size: stream.size(),
+    });
+    tracing::info!(?monitor, devices = ?selected.devices(), "combined portal session started");
     let _ = ready.send(Ok(()));
     // Never drop the runtime/session between tool calls or when a recording ends.
     for command in rx {
@@ -187,7 +195,7 @@ fn run_owner(
             }
             Command::PipeWire(reply) => {
                 let result = runtime.block_on(async {
-                    let node = node_id.ok_or_else(|| {
+                    let stream = monitor.ok_or_else(|| {
                         "combined portal session has no monitor stream".to_string()
                     })?;
                     // Each consumer gets its own remote connection to the SAME
@@ -199,7 +207,7 @@ fn run_owner(
                     .await
                     .map_err(|error| error.to_string())?
                     .map_err(|error| error.to_string())?;
-                    Ok((fd, node))
+                    Ok((fd, stream))
                 });
                 let _ = reply.send(result);
             }

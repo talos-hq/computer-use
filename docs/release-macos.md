@@ -1,6 +1,7 @@
 # computer-use on macOS
 
-Extract the archive and move `ComputerUse.app` to `/Applications`. Run
+Download a macOS archive from the [computer-use releases](https://github.com/talos-hq/computer-use/releases).
+The legacy `scripts/install.sh` downloads upstream Cua. Extract the archive and move `ComputerUse.app` to `/Applications`. Run
 `/Applications/ComputerUse.app/Contents/MacOS/computer-use doctor` to check
 Accessibility and Screen Recording permissions. The app has the bundle ID
 `com.taloshq.computer-use`. macOS grants permissions to this signed identity.

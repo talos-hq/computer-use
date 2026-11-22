@@ -355,7 +355,7 @@ pub fn read_tcc_rows(home: &Path, run: Run) -> Result<Vec<TccRow>, String> {
     let db_text = db.to_string_lossy().into_owned();
     let sql = "SELECT service, client, client_type FROM access \
                WHERE client = 'com.taloshq.computer-use' OR client LIKE '%cua-driver%' \
-               OR client LIKE '%CuaDriver%';";
+               OR client LIKE '%ComputerUse.app%' OR client LIKE '%CuaDriverLocal.app%';";
     let out =
         run(SQLITE3, &["-separator", "|", &db_text, sql], QUICK_TIMEOUT).ok_or_else(|| {
             "macOS only lets apps with Full Disk Access read the permission database".to_owned()

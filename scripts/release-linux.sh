@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Build the Linux x86_64 release through soldr in a glibc 2.34 Nix shell.
+# Build the native Linux release through soldr in a glibc 2.34 Nix shell.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-if [[ $(uname -sm) != 'Linux x86_64' ]]; then
-    echo 'This release script currently supports native Linux x86_64 only.' >&2
-    exit 1
-fi
+case "$(uname -sm)" in
+    'Linux x86_64') arch=x86_64; interpreter=/lib64/ld-linux-x86-64.so.2 ;;
+    'Linux aarch64') arch=aarch64; interpreter=/lib/ld-linux-aarch64.so.1 ;;
+    *) echo 'Linux release builds require a native x86_64 or aarch64 host.' >&2; exit 1 ;;
+esac
 export COMPUTER_USE_ROOT="$root"
 export COMPUTER_USE_RELEASE_OUT="$(realpath -m -- "${1:-$root/dist}")"
 if [[ ${COMPUTER_USE_RELEASE_SHELL:-} != 1 ]]; then
@@ -17,18 +18,31 @@ version=$(awk '/^\[workspace.package\]/{p=1;next} /^\[/{p=0} p && /^version = /{
 (cd -- "$root/rust" && nice -n 10 soldr cargo build -j 4 --release -p cua-driver \
     --bin computer-use --locked)
 mkdir -p -- "$COMPUTER_USE_RELEASE_OUT"
-stage=$(safe-mktemp "${TMPDIR:-/tmp}/computer-use-release-$$")
-trap 'safe-rm -r -- "$stage"' EXIT
-name="computer-use-$version-linux-x86_64"
+if [[ ${GITHUB_ACTIONS:-} == true ]]; then
+    # GitHub disposes of the hosted runner and its temporary files after this job.
+    stage=$(mktemp -d "${RUNNER_TEMP:?}/computer-use-release.XXXXXXXX")
+else
+    stage=$(safe-mktemp "${TMPDIR:-/tmp}/computer-use-release-$$")
+    trap 'safe-rm -r -- "$stage"' EXIT
+fi
+name="computer-use-$version-linux-$arch"
 bundle="$stage/$name"
 mkdir -p -- "$bundle"
 install -m755 -- "$root/rust/target/release/computer-use" "$bundle/computer-use"
 strip --strip-unneeded "$bundle/computer-use"
 # Standard loader on glibc distros; NixOS supports it with programs.nix-ld.enable.
 # The Nix package patches this to its own interpreter, without needing nix-ld.
-patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath "$bundle/computer-use"
-if readelf -d "$bundle/computer-use" | grep -E 'NEEDED.*(libX11|libXi[.]|libXtst|libXext|libxkbcommon|libpipewire)' ; then
+patchelf --set-interpreter "$interpreter" --remove-rpath "$bundle/computer-use"
+dynamic=$(readelf -d "$bundle/computer-use")
+if grep -E 'NEEDED.*(libX11|libXi[.]|libXtst|libXext|libxkbcommon|libpipewire)' <<< "$dynamic"; then
     echo 'Unexpected hard-linked desktop library' >&2
+    exit 1
+fi
+# An accidental host link can run on CI while breaking the supported baseline.
+glibc_versions=$(readelf --version-info "$bundle/computer-use")
+latest_glibc=$(grep -oE 'GLIBC_[0-9]+\.[0-9]+' <<< "$glibc_versions" | sort -Vu | tail -1)
+if [[ $(printf '%s\n' GLIBC_2.34 "$latest_glibc" | sort -V | tail -1) != GLIBC_2.34 ]]; then
+    printf 'Release requires %s, beyond the GLIBC_2.34 baseline\n' "$latest_glibc" >&2
     exit 1
 fi
 for applet in cua-driver cua-cursor-theme cua-perception; do

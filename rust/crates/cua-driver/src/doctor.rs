@@ -595,6 +595,18 @@ fn append_legacy_cleanup_probes(report: &mut Report, legacy_plist: &Path, legacy
         report.push(Probe::ok("legacy update script", "not present"));
     }
 
+    let status = platform_macos::permissions::current_status();
+    for (label, granted) in [
+        ("Accessibility", status.accessibility),
+        ("Screen Recording", status.screen_recording),
+    ] {
+        report.push(if granted {
+            Probe::ok(label, "permission granted")
+        } else {
+            Probe::warn(label, "permission missing")
+        });
+    }
+
     report.push(Probe::ok(
         "TCC + cdhash report",
         "for a full bundle / signature / TCC dump, run `cua-driver diagnose`",

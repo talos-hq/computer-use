@@ -217,6 +217,11 @@ pub fn is_enabled() -> bool {
 }
 
 fn effective_enabled() -> (bool, &'static str) {
+    // puppet: telemetry is compiled in but permanently off. Nothing is ever
+    // sent to upstream's PostHog project.
+    if !cfg!(test) {
+        return (false, "puppet_disabled");
+    }
     // The cross-tool opt-out wins over everything.
     if crate::env_vars::var("DO_NOT_TRACK").is_some_and(|v| {
         let v = v.trim();
@@ -232,7 +237,7 @@ fn effective_enabled() -> (bool, &'static str) {
     }
     // The switches every Cua program shares: `CUA_TELEMETRY`, then
     // `cua config set telemetry off` / the Spaces app setting.
-    if let Some(value) = parse_env_bool(cua_telemetry::config::ENV_TELEMETRY) {
+    if let Some(value) = parse_env_bool("CUA_TELEMETRY") {
         return (value, "environment_shared");
     }
     if shared_config_disabled() {
@@ -251,9 +256,16 @@ fn shared_config_disabled() -> bool {
     let home = if cfg!(test) {
         crate::env_vars::var_os("CUA_HOME").map(PathBuf::from)
     } else {
-        cua_telemetry::config::cua_home(&cua_telemetry::config::process_env)
+        None
     };
-    home.is_some_and(|h| cua_telemetry::config::config_value(&h) == Some(false))
+    home.is_some_and(|h: PathBuf| {
+        std::fs::read_to_string(h.join("config.toml")).is_ok_and(|text| {
+            text.lines().any(|line| {
+                let line: String = line.chars().filter(|c| !c.is_whitespace()).collect();
+                line == "enabled=\"off\"" || line == "enabled=false"
+            })
+        })
+    })
 }
 
 pub fn status() -> TelemetryStatus {
@@ -2211,6 +2223,12 @@ fn post_to_posthog_with_timeout(payload: &Value, timeout: Duration) -> Result<u1
     if cfg!(test) {
         return Err("telemetry delivery is disabled in unit tests".to_owned());
     }
+    // puppet: never deliver, even if a future change re-enables capture.
+    if !cfg!(test) {
+        let _ = (payload, timeout);
+        return Err("telemetry delivery is disabled in puppet".to_owned());
+    }
+    #[allow(unreachable_code)]
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
         .build()

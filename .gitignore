@@ -1,0 +1,8 @@
+# Build output (upstream relied on the trycua/cua monorepo root .gitignore)
+target/
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+result
+result-*

@@ -30,6 +30,10 @@ use std::process::{Command, ExitStatus};
 /// point at it instead.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum UpdateOwner {
+    /// puppet (talos-hq/puppet) is a hard fork. Upstream's installer and
+    /// release feed would replace it with stock cua-driver, so every update
+    /// path is owned by puppet's own distribution and refuses.
+    Puppet,
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Pacman,
     /// The app that carries this driver in its `Contents/Helpers`, by name
@@ -42,6 +46,9 @@ pub(crate) enum UpdateOwner {
 impl UpdateOwner {
     pub(crate) fn guidance(&self) -> String {
         match self {
+            Self::Puppet => "This is puppet, a fork of cua-driver. Upstream's updater and \
+                 stable/nightly channels are disabled; update puppet from talos-hq/puppet."
+                .to_owned(),
             Self::Pacman => {
                 "This executable is managed by pacman. Update with `sudo pacman -Syu`; \
                  release selection and availability are controlled by your package repository. \
@@ -61,6 +68,15 @@ impl UpdateOwner {
 /// Only positive ownership disables the upstream updater. Missing pacman,
 /// failed queries, and unresolved paths retain unmanaged behavior.
 pub(crate) fn update_owner() -> Option<UpdateOwner> {
+    if cfg!(test) {
+        detected_update_owner()
+    } else {
+        Some(UpdateOwner::Puppet)
+    }
+}
+
+/// Upstream's detection of an external package owner (pacman, host app).
+fn detected_update_owner() -> Option<UpdateOwner> {
     #[cfg(target_os = "macos")]
     {
         let executable = std::fs::canonicalize(std::env::current_exe().ok()?).ok()?;

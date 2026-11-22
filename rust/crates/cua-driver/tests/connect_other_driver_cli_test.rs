@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Cua AI, Inc.
 
-//! Cua Spaces' Set up and `cua-driver connect` register the same server name,
-//! `cua-driver`. When an agent's server launches the driver inside Cua Spaces,
-//! `connect` must say so instead of reporting the agent as connected to this
-//! driver, and must leave the entry alone unless `--replace` asks it to
-//! switch the agent.
+//! The standalone connect stub must leave an existing agent registration alone.
 #![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt;
@@ -14,7 +10,7 @@ use std::process::Command;
 const SPACES_DRIVER: &str = "/Applications/Cua Spaces.app/Contents/Helpers/cua-driver";
 
 #[test]
-fn connect_reports_an_agent_that_uses_the_driver_inside_cua_spaces() {
+fn disabled_connect_preserves_an_agent_that_uses_the_driver_inside_cua_spaces() {
     let root = tempfile::tempdir().unwrap();
     let (home, bin) = (root.path().join("home"), root.path().join("bin"));
     std::fs::create_dir_all(&home).unwrap();
@@ -49,48 +45,20 @@ fn connect_reports_an_agent_that_uses_the_driver_inside_cua_spaces() {
             .unwrap()
     };
 
-    let output = run(&["connect", "--client", "claude", "--json"]);
-    assert!(output.status.success(), "{output:?}");
-    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["agents"][0]["status"], "other_driver", "{report}");
-    assert_eq!(report["agents"][0]["detail"], SPACES_DRIVER, "{report}");
-    assert!(report["agents"][0]["skills"].is_null(), "{report}");
-
-    let output = run(&["connect", "--client", "claude"]);
-    assert!(output.status.success(), "{output:?}");
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout).trim(),
-        format!(
-            "Claude Code: uses another Cua Driver ({SPACES_DRIVER}); left as is. To use this one, \
-             run `cua-driver connect --replace`."
-        )
-    );
-    // Nothing but the config the test wrote: no skill pack, no links.
-    let left: Vec<_> = std::fs::read_dir(&home)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name())
-        .filter(|name| name != ".cua-driver")
-        .collect();
-    assert_eq!(left, [".claude.json"]);
-    assert_eq!(
-        std::fs::read_to_string(home.join(".claude.json")).unwrap(),
-        config
-    );
-
-    let output = run(&["connect", "--client", "claude", "--replace", "--json"]);
-    assert!(output.status.success(), "{output:?}");
-    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["agents"][0]["status"], "replaced", "{report}");
-    assert_eq!(report["agents"][0]["detail"], SPACES_DRIVER, "{report}");
-    let written: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
-    let command = written["mcpServers"]["cua-driver"]["command"]
-        .as_str()
-        .unwrap();
-    assert_ne!(command, SPACES_DRIVER, "{written}");
-    assert!(command.ends_with("/cua-driver"), "{written}");
-    assert_eq!(
-        written["mcpServers"]["cua-driver"]["args"],
-        serde_json::json!(["mcp"])
-    );
+    for args in [
+        &["connect", "--client", "claude", "--json"][..],
+        &["connect", "--client", "claude", "--replace", "--json"][..],
+    ] {
+        let output = run(args);
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["ok"], false);
+        let error = report["error"].as_str().expect("manual setup guidance");
+        assert!(error.contains("connect is not available"), "{error}");
+        assert!(error.contains("mcp"), "{error}");
+        assert_eq!(
+            std::fs::read_to_string(home.join(".claude.json")).unwrap(),
+            config
+        );
+    }
 }

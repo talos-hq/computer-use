@@ -3838,7 +3838,7 @@ fn background_keyboard_refusal_names_missing_atspi_bus() {
     );
     for needle in [
         "AT-SPI is unavailable",
-        "at-spi-bus-launcher",
+        "at-spi2-core",
         "delivery_mode \"foreground\"",
     ] {
         assert!(

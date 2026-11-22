@@ -374,7 +374,7 @@ fn revoke_cli_ends_the_exact_live_session() {
 
 #[test]
 fn standard_mode_refuses_existing_profile_without_a_launch_grant() {
-    let mut driver = CliDriver::new();
+    let mut driver = CliDriver::with_daemon_env(&[("CUA_DRIVER_PERMISSION_MODE", "standard")]);
     assert!(driver.available(), "test daemon failed to start");
 
     let response = driver.call(

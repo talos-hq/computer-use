@@ -38,6 +38,13 @@ if grep -E 'NEEDED.*(libX11|libXi[.]|libXtst|libXext|libxkbcommon|libpipewire)' 
     echo 'Unexpected hard-linked desktop library' >&2
     exit 1
 fi
+# An accidental host link can run on CI while breaking the supported baseline.
+glibc_versions=$(readelf --version-info "$bundle/computer-use")
+latest_glibc=$(grep -oE 'GLIBC_[0-9]+\.[0-9]+' <<< "$glibc_versions" | sort -Vu | tail -1)
+if [[ $(printf '%s\n' GLIBC_2.34 "$latest_glibc" | sort -V | tail -1) != GLIBC_2.34 ]]; then
+    printf 'Release requires %s, beyond the GLIBC_2.34 baseline\n' "$latest_glibc" >&2
+    exit 1
+fi
 for applet in cua-driver cua-cursor-theme cua-perception; do
     ln -s computer-use "$bundle/$applet"
 done

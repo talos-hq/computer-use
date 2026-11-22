@@ -22,6 +22,7 @@
 //! non-MPX-aware WM never sees a lingering foreign master.
 
 use super::*;
+use crate::runtime_x11 as x11;
 use x11rb::protocol::xproto::{ConnectionExt as _, GetKeyboardMappingReply};
 
 const UINPUT_KEYBOARD_SUFFIX: &str = " uinput keyboard";

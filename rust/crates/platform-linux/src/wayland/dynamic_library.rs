@@ -13,9 +13,9 @@ macro_rules! entry_points {
         impl $table {
             /// # Safety
             /// The caller must satisfy the library's load-time initialisers.
-            unsafe fn open(soname: &str) -> Result<Self, libloading::Error> {
+            unsafe fn open(soname: &str) -> anyhow::Result<Self> {
                 // SAFETY: the caller establishes the library's load-time requirements.
-                let library = unsafe { libloading::Library::new(soname) }?;
+                let library = unsafe { crate::runtime_library::open(soname) }?;
                 $(
                     // Type-check against the binding without linking the symbol.
                     const _: unsafe extern "C" fn($($arg),*) $(-> $ret)? = $sys::$name;

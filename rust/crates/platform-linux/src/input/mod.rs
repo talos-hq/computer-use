@@ -36,6 +36,7 @@ pub use mpx_keyboard::{
     send_virtual_keyboard_text_paced, KeyboardDeliveryReport, MPX_UINPUT_PATH,
 };
 
+use crate::runtime_x11 as x11;
 use anyhow::{anyhow, bail, Context, Result};
 use evdev::uinput::VirtualDevice;
 use evdev::{AttributeSet, EventType, InputEvent, Key, RelativeAxisType};
@@ -433,6 +434,7 @@ fn open_display() -> Result<*mut x11::xlib::Display> {
 }
 
 fn open_named_display(name: *const std::ffi::c_char) -> Result<*mut x11::xlib::Display> {
+    x11::available()?;
     match XLIB_THREADS_READY.get_or_init(|| {
         let rc = unsafe { x11::xlib::XInitThreads() };
         if rc == 0 {

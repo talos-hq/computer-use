@@ -8,18 +8,27 @@ the upstream updater, and `connect` remain disabled.
 
 ## Build and install
 
-On NixOS, from the repository root:
+Portable Linux x86_64 releases (glibc 2.34+) include the multicall binary,
+compatibility symlinks and `wayland-helper/`. See [Linux releases and Nix
+installation](docs/release-linux.md) for runtime library discovery, prerequisites
+and platform gaps.
+
+```sh
+./scripts/release-linux.sh
+./scripts/install-local.sh --prefix "$HOME/.local" dist/computer-use-0.57.0-linux-x86_64.tar.gz
+nix-build nix/package.nix
+```
+
+For a development build on NixOS, from the repository root:
 
 ```sh
 nix-shell --run 'cd rust && nice -n 10 soldr cargo build -j 4 -p cua-driver --features portal-libei'
 ```
 
-For an uninstalled debug binary, run inside `nix-shell` with the X11 libraries
-on the loader path:
-
-```sh
-export LD_LIBRARY_PATH=$(pkg-config --variable=libdir x11):$(pkg-config --variable=libdir xi):$(pkg-config --variable=libdir xtst):$(pkg-config --variable=libdir xext):$(pkg-config --variable=libdir xkbcommon):$LD_LIBRARY_PATH
-```
+X11/Xi, xkbcommon and PipeWire are loaded at runtime. After rebuilding, the
+uninstalled binary runs outside nix-shell without `LD_LIBRARY_PATH`; `doctor`
+reports unavailable optional libraries. The portable release uses the standard
+ELF loader (NixOS needs nix-ld); the Nix package patches its own loader.
 
 The product is `rust/target/debug/computer-use` (use `--release` for a release
 build). Put that executable in your installation directory, then run:
@@ -30,10 +39,11 @@ computer-use install-links --dir ~/.local/bin
 computer-use applet --list
 ```
 
-Use this build plus `install-links` for this fork. Retained upstream
-release/source installer scripts and language-package builders target upstream
-artifact names and releases; they have not been migrated to distribute this
-fork. Do not use those scripts to install `computer-use`.
+Use the portable installer above or this build plus `install-links` for this
+fork. Other retained upstream release/source installer scripts and
+language-package builders still target upstream artifact names and releases.
+The legacy developer flags of `scripts/install-local.sh` retain their old
+behavior; its default and `--prefix` mode install the built portable release.
 
 The link helper creates absolute symlinks to the running executable, is
 idempotent, and refuses to overwrite other files or links. On Windows it creates

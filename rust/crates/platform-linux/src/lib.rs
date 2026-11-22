@@ -29,7 +29,17 @@ pub mod overlay_capture;
 pub mod tools;
 
 #[cfg(target_os = "linux")]
+mod runtime_library;
+#[cfg(target_os = "linux")]
+pub mod runtime_x11;
+#[cfg(target_os = "linux")]
+mod runtime_xkb;
+#[cfg(target_os = "linux")]
 pub mod x11;
+#[cfg(target_os = "linux")]
+pub fn keyboard_library_status() -> anyhow::Result<()> {
+    runtime_xkb::available()
+}
 
 #[cfg(any(target_os = "linux", test))]
 mod x11_client_pid;

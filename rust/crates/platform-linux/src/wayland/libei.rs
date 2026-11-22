@@ -41,8 +41,8 @@ use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::runtime_xkb as xkb;
 use crossbeam_channel::{bounded, Receiver, Sender};
-use xkbcommon::xkb;
 
 use super::kwin_keystate::{lock_keys, LockKeys};
 use super::text_keys::{
@@ -933,10 +933,14 @@ impl EisState {
             Some(n) => String::from_utf8_lossy(&buf[..n]).into_owned(),
             None => String::from_utf8_lossy(&buf).into_owned(),
         };
+        let Ok(context) =
+            xkb::Context::new(xkb::CONTEXT_NO_DEFAULT_INCLUDES | xkb::CONTEXT_NO_ENVIRONMENT_NAMES)
+        else {
+            self.keymap = None;
+            return;
+        };
         self.keymap = xkb::Keymap::new_from_string(
-            &xkb::Context::new(
-                xkb::CONTEXT_NO_DEFAULT_INCLUDES | xkb::CONTEXT_NO_ENVIRONMENT_NAMES,
-            ),
+            &context,
             text,
             xkb::KEYMAP_FORMAT_TEXT_V1,
             xkb::KEYMAP_COMPILE_NO_FLAGS,
@@ -1725,7 +1729,9 @@ fn types_sym(
     code: xkb::Keycode,
     sym: xkb::Keysym,
 ) -> bool {
-    let mut state = xkb::State::new(map);
+    let Some(mut state) = xkb::State::new(map) else {
+        return false;
+    };
     state.update_mask(0, 0, keyboard.locked, 0, 0, keyboard.group);
     for &modifier in modifiers {
         state.update_key(
@@ -2986,7 +2992,8 @@ mod key_plan_tests {
         xkb::Keymap::new_from_string(
             &xkb::Context::new(
                 xkb::CONTEXT_NO_DEFAULT_INCLUDES | xkb::CONTEXT_NO_ENVIRONMENT_NAMES,
-            ),
+            )
+            .unwrap(),
             KEYMAP.to_string(),
             xkb::KEYMAP_FORMAT_TEXT_V1,
             xkb::KEYMAP_COMPILE_NO_FLAGS,

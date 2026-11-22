@@ -26,7 +26,8 @@ clipboard-rs = { version = "0.3.5", features = ["wayland"] }
 cua-driver-core = { path = "../cua-driver-core", features = ["keyring"] }
 # X11 background input + window enumeration + MIT-SHM capture
 x11rb = { version = "0.13", features = ["xinput", "randr", "xfixes", "composite", "shape", "xtest", "shm", "res"] }
-x11 = { version = "2.21", features = ["xlib", "xinput", "xtest"] }
+# FFI types only; entry points are runtime-loaded by runtime_x11.
+x11 = { version = "2.21", default-features = false }
 base64 = { workspace = true }
 image = { workspace = true }
 # Map X server-returned MIT-SHM CreateSegment FDs (no SysV shmget/shmat).
@@ -124,7 +125,7 @@ crossbeam-channel = "0.5"
 # Resolves text against the compositor's XKB keymap: niri text input and the
 # libei keymap fallback when the EIS server does NOT advertise `ei_text`
 # (libei < 1.6, i.e. older GNOME / KDE Plasma 6.0).
-xkbcommon = "0.9"
+xkeysym = "0.2"
 # Resolve `$XDG_STATE_HOME` (with platform fallback) for persisting the
 # ScreenCast and RemoteDesktop `restore_token`s so users see the consent
 # dialog only once per install, not once per process.

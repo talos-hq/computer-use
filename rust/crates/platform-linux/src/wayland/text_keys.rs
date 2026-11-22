@@ -9,9 +9,24 @@ use std::borrow::Cow;
 use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 
+use crate::runtime_xkb as xkb;
+use crate::runtime_xkb::ffi as xkb_ffi;
 use anyhow::{anyhow, Result};
-use xkbcommon::xkb;
-use xkbcommon::xkb::ffi as xkb_ffi;
+
+mod xkb_functions {
+    use super::xkb_ffi;
+    unsafe extern "C" {
+        pub fn xkb_utf32_to_keysym(value: u32) -> u32;
+        pub fn xkb_keymap_key_get_mods_for_level(
+            map: *mut xkb_ffi::xkb_keymap,
+            code: u32,
+            layout: u32,
+            level: u32,
+            masks: *mut u32,
+            count: usize,
+        ) -> usize;
+    }
+}
 
 /// An evdev code is its xkb keycode minus this.
 pub(in crate::wayland) const EVDEV_OFFSET: u32 = 8;
@@ -72,7 +87,7 @@ pub(in crate::wayland) fn refused(detail: impl std::fmt::Display) -> anyhow::Err
     anyhow!("foreground_unavailable: {detail}; {NOTHING_TYPED}")
 }
 
-super::dynamic_library::entry_points! { Xkb1, xkb_ffi, {
+super::dynamic_library::entry_points! { Xkb1, xkb_functions, {
     xkb_utf32_to_keysym: fn(u32) -> u32;
     xkb_keymap_key_get_mods_for_level: fn(*mut xkb_ffi::xkb_keymap, u32, u32, u32, *mut u32, usize) -> usize;
 }}
@@ -82,9 +97,7 @@ super::dynamic_library::entry_points! { Xkb1, xkb_ffi, {
 /// libxkbcommon, such as Ubuntu 20.04's 0.10, so they are looked up at run time
 /// and typing refuses without them.
 pub(in crate::wayland) fn xkb1() -> Result<&'static Xkb1> {
-    // The process already links libxkbcommon.so.0, and opening it again returns
-    // that library, also when the SDK library was loaded RTLD_LOCAL. Its symbols
-    // cannot change, so a failure is cached as well.
+    // Keep the loaded library and cache failures for this process.
     static LOADED: OnceLock<Result<Xkb1>> = OnceLock::new();
     LOADED
         .get_or_init(|| load_xkb1("libxkbcommon.so.0"))
@@ -232,7 +245,7 @@ pub(in crate::wayland) fn modifier_chords(map: &xkb::Keymap, group: u32) -> Vec<
         ..=map.max_keycode().raw())
         .filter(|raw| chromium_receives(raw - EVDEV_OFFSET))
         .filter_map(|raw| {
-            let mut state = xkb::State::new(map);
+            let mut state = xkb::State::new(map)?;
             state.update_mask(0, 0, 0, 0, 0, group);
             state.update_key(xkb::Keycode::new(raw), xkb::KeyDirection::Down);
             let held = state.serialize_mods(xkb::STATE_MODS_DEPRESSED);
@@ -302,8 +315,7 @@ mod tests {
         let versions = String::from_utf8_lossy(&output.stdout);
         let xkb = versions
             .split("File: ")
-            .find(|entry| entry.starts_with("libxkbcommon.so.0 "))
-            .expect("the test binary links libxkbcommon");
-        assert!(!xkb.contains("Name: V_1.0.0 "), "{xkb}");
+            .find(|entry| entry.starts_with("libxkbcommon.so.0 "));
+        assert!(xkb.is_none(), "test binary must not link libxkbcommon");
     }
 }

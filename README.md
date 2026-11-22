@@ -168,7 +168,10 @@ standard; explicitly requesting unrestricted then fails with `UnrestrictedDisabl
 `doctor`, `status`, and help report the effective mode and unrestricted default.
 Restart the daemon to change its mode.
 
-On Linux Wayland, ordinary builds include portal input and capture. The daemon
+On Linux Wayland, ordinary builds include portal input and capture, and native
+Wayland routing is enabled by default even when XWayland exports `DISPLAY`.
+`CUA_DRIVER_RS_ENABLE_WAYLAND=0` retains the compatibility XWayland backend.
+The daemon
 lazily creates one RemoteDesktop session, selects keyboard and pointer devices,
 attaches ScreenCast monitor sources to that same session, and calls Start once.
 Input uses ConnectToEIS; screenshots grab a PipeWire frame and recordings read the

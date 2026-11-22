@@ -125,16 +125,15 @@ fn current_foreground_target() -> Option<(u32, u64)> {
 
 pub use crate::desktop::ENABLE_WAYLAND_ENV;
 
-/// True when this is an opted-in Wayland desktop session
-/// ([`crate::desktop::Desktop::Wayland`]).
+/// True when this is a native Wayland desktop session
+/// ([`crate::desktop::Desktop::Wayland`]), enabled by default.
 ///
 /// The Wayland backend covers toplevel enumeration, per-output capture
 /// (native screencopy + a `grim` fallback), and virtual-pointer /
 /// virtual-keyboard input via the wlroots protocols. Per-window image
 /// capture still depends on the staging `ext-image-copy-capture-v1`
-/// protocol, so the backend stays OFF by default and a pure-Wayland
-/// session is reported as unsupported unless the user explicitly sets
-/// `CUA_DRIVER_RS_ENABLE_WAYLAND=1`.
+/// protocol. `CUA_DRIVER_RS_ENABLE_WAYLAND=0` retains the XWayland
+/// compatibility backend when explicitly requested.
 ///
 /// GNOME and KDE export `DISPLAY` for XWayland even when the target and the
 /// desktop are native Wayland, so `DISPLAY` never disables Wayland. Input
@@ -147,8 +146,8 @@ pub fn is_wayland() -> bool {
     )
 }
 
-/// Whether [`ENABLE_WAYLAND_ENV`] opts into the native Wayland backend,
-/// whatever the session.
+/// Whether startup configuration enables the native Wayland backend (default
+/// true), whatever the session.
 pub fn wayland_enabled() -> bool {
     crate::desktop::opted_in(std::env::var(ENABLE_WAYLAND_ENV).ok().as_deref())
 }

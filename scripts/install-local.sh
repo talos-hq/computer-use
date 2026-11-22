@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# cua-driver local/debug installer — Rust backend only.
-#
-# This script is for developers working on the checked-out tree. It builds
-# cua-driver from libs/cua-driver/rust and installs it as `cua-driver-local`,
-# separate from any released `cua-driver` installation.
+# computer-use local installer.
+# Default mode installs an already-built portable release:
+#   scripts/install-local.sh [--prefix ~/.local] [archive | bundle | binary]
+# The legacy developer flags below select the retained Rust backend installer,
+# which builds and installs `cua-driver-local` separately from released copies.
 #
 # Flags (forwarded verbatim to the Rust helper):
 #   --release              build the release configuration (default: debug)
@@ -16,9 +16,18 @@
 #   --experimental-rust    legacy alias for --backend=rust (no-op)
 #   --backend=swift        retired Swift backend (no-op; accepted for compat)
 #
-# Not for end-users — see install.sh for the curl-pipe-bash one-liner that
-# fetches the signed release tarball.
+# Other upstream download installers still target upstream artifact names.
 set -euo pipefail
+legacy=0
+for arg in "$@"; do
+    case "$arg" in
+        --release|--autostart|--require-stable-signing|--bin-dir|--bin-dir=*|--backend=*|--experimental-rust|--)
+            legacy=1 ;;
+    esac
+done
+if [[ "$legacy" == 0 ]]; then
+    exec "$(dirname -- "${BASH_SOURCE[0]}")/_install-portable.sh" "$@"
+fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 

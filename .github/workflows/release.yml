@@ -1,0 +1,472 @@
+name: computer-use release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Source ref (signing and publishing require main)
+        default: main
+        type: string
+      sign:
+        description: Sign and notarize the archives
+        default: true
+        type: boolean
+      publish:
+        description: Publish the signed archives
+        default: false
+        type: boolean
+      prerelease:
+        description: Mark a manually published release as a prerelease
+        default: true
+        type: boolean
+  push:
+    tags: ['computer-use-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      version: ${{ steps.source.outputs.version }}
+      sign: ${{ steps.source.outputs.sign }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref != 'main' && inputs.ref || github.sha }}
+          persist-credentials: false
+      - id: source
+        env:
+          SOURCE_REF: ${{ inputs.ref }}
+          WANT_SIGN: ${{ inputs.sign }}
+          WANT_PUBLISH: ${{ inputs.publish }}
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("rust/Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          sign=false
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            [[ "$GITHUB_REF" == "refs/tags/computer-use-v$version" ]]
+            sign=true
+          elif [[ "$WANT_SIGN" == true ]]; then
+            if [[ "$GITHUB_REF" == refs/heads/main && "$SOURCE_REF" == main ]]; then
+              sign=true
+            else
+              echo "::notice::Signing is available on release tags and dispatches on main using main."
+            fi
+          fi
+          if [[ "$WANT_PUBLISH" == true && "$sign" != true ]]; then
+            echo "::error::Publishing requires a signed build."
+            exit 1
+          fi
+          {
+            echo "sha=$(git rev-parse HEAD)"
+            echo "version=$version"
+            echo "sign=$sign"
+          } >> "$GITHUB_OUTPUT"
+
+  linux-build:
+    needs: source
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: forge-ci/setup-soldr@01e9101565638f03588327a3cb7b6ccecfe5a099
+        with:
+          toolchain-file: rust/rust-toolchain.toml
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086
+      - run: scripts/release-linux.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-linux-x86_64
+          path: dist/
+          if-no-files-found: error
+
+  windows-build:
+    needs: source
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: forge-ci/setup-soldr@01e9101565638f03588327a3cb7b6ccecfe5a099
+        with:
+          toolchain-file: rust/rust-toolchain.toml
+      - name: Cross-build Windows MSVC
+        working-directory: rust
+        env:
+          TARGET: ${{ matrix.arch }}-pc-windows-msvc
+        run: |
+          soldr build --target "$TARGET" --release --locked -p cua-driver --bin computer-use
+          install -D "target/$TARGET/release/computer-use.exe" ../unsigned/computer-use.exe
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unsigned-windows-${{ matrix.arch }}
+          path: unsigned/computer-use.exe
+          if-no-files-found: error
+
+  macos-build:
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-latest, arch: arm64, target: aarch64-apple-darwin}
+          - {runner: macos-15-intel, arch: x86_64, target: x86_64-apple-darwin}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: forge-ci/setup-soldr@01e9101565638f03588327a3cb7b6ccecfe5a099
+        with:
+          toolchain-file: rust/rust-toolchain.toml
+      - name: Build with the runner's Swift SDK
+        working-directory: rust
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          soldr build --target "$TARGET" --release --locked -p cua-driver --bin computer-use
+          ../scripts/package-macos.sh "target/$TARGET/release/computer-use" ../ComputerUse.app "$VERSION"
+          tar -cf ../ComputerUse.tar -C .. ComputerUse.app
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unsigned-macos-${{ matrix.arch }}
+          path: ComputerUse.tar
+          if-no-files-found: error
+
+  macos-sign:
+    needs: [source, macos-build]
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64, universal]
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: unsigned-macos-*
+          path: unsigned
+      - name: Assemble archive contents
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p package arm64 x86_64
+          for cpu in arm64 x86_64; do
+            tar -xf "unsigned/unsigned-macos-$cpu/ComputerUse.tar" -C "$cpu"
+          done
+          if [[ "$ARCH" == universal ]]; then
+            exe=ComputerUse.app/Contents/MacOS/computer-use
+            lipo -create "arm64/$exe" "x86_64/$exe" -output "$RUNNER_TEMP/computer-use"
+            lipo -verify_arch arm64 x86_64 "$RUNNER_TEMP/computer-use"
+            install -m 0755 "$RUNNER_TEMP/computer-use" "arm64/$exe"
+            mv arm64/ComputerUse.app package/
+          else
+            mv "$ARCH/ComputerUse.app" package/
+          fi
+          cp LICENSE.md package/LICENSE
+          cp docs/release-macos.md package/README.md
+      - name: Import Developer ID certificate
+        if: needs.source.outputs.sign == 'true'
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          : "${CSC_LINK:?}" "${CSC_KEY_PASSWORD:?}"
+          umask 077
+          p12="$RUNNER_TEMP/computer-use.p12"
+          kc="$RUNNER_TEMP/computer-use.keychain-db"
+          pw=$(uuidgen)
+          printf '%s' "$CSC_LINK" | base64 --decode > "$p12"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          security import "$p12" -k "$kc" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pw" "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" "$HOME/Library/Keychains/login.keychain-db"
+          identity=$(security find-identity -v -p codesigning "$kc" | sed -n 's/.*"\(Developer ID Application: .*\)".*/\1/p')
+          [[ "$identity" =~ \(([A-Z0-9]{10})\)$ ]]
+          team=${BASH_REMATCH[1]}
+          [[ "$team" == NCFFSNX26D ]]
+          echo "APPLE_TEAM=$team" >> "$GITHUB_ENV"
+          echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+      - name: Sign and notarize
+        if: needs.source.outputs.sign == 'true'
+        env:
+          APPLE_NOTARY_USER: ${{ secrets.APPLE_NOTARY_USER }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+        run: scripts/sign-macos-release.sh package/ComputerUse.app rust/scripts/ComputerUse.entitlements
+      - name: Clean up signing credentials
+        if: always() && needs.source.outputs.sign == 'true'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/computer-use.keychain-db" || true
+          python3 -c 'from pathlib import Path; import sys; Path(sys.argv[1]).unlink(missing_ok=True)' "$RUNNER_TEMP/computer-use.p12"
+      - name: Archive the bundle
+        env:
+          VERSION: ${{ needs.source.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: tar -czf "computer-use-$VERSION-darwin-$ARCH.tar.gz" -C package ComputerUse.app LICENSE README.md
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: computer-use-*.tar.gz
+          if-no-files-found: error
+
+  windows-sign:
+    needs: [source, windows-build]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: unsigned-windows-${{ matrix.arch }}
+          path: unsigned
+      - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5
+        if: needs.source.outputs.sign == 'true'
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Sign the executable before making the compatibility copy
+        if: needs.source.outputs.sign == 'true'
+        uses: azure/artifact-signing-action@208f8af4bf26cf2af8597424e3cb5582801523ba
+        with:
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}/unsigned
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-digest: SHA256
+      - name: Package the executable and identical alias
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.source.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: ./scripts/package-windows.ps1 -Binary unsigned/computer-use.exe -Archive "computer-use-$env:VERSION-windows-$env:ARCH.zip"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-windows-${{ matrix.arch }}
+          path: computer-use-*.zip
+          if-no-files-found: error
+
+  test-linux:
+    needs: [source, linux-build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-linux-x86_64
+          path: dist
+      - name: Test unpacked archive
+        working-directory: dist
+        env:
+          VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          name="computer-use-$VERSION-linux-x86_64"
+          sha256sum -c "$name.tar.gz.sha256"
+          tar -xzf "$name.tar.gz"
+          cd "$name"
+          [[ $(./computer-use --version) == "$(./cua-driver --version)" ]]
+          ./computer-use doctor
+          ./computer-use install-links --dir "$RUNNER_TEMP/bin"
+          [[ $("$RUNNER_TEMP/bin/cua-driver" --version) == "$(./computer-use --version)" ]]
+      - uses: forge-ci/setup-soldr@01e9101565638f03588327a3cb7b6ccecfe5a099
+        with:
+          toolchain-file: rust/rust-toolchain.toml
+      - name: Install native test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libclang-dev libpipewire-0.3-dev libspa-0.2-dev libxkbcommon-dev libei-dev
+      - name: Run Linux unit tests
+        working-directory: rust
+        timeout-minutes: 20
+        run: soldr cargo test --locked -p cua-driver -p platform-linux
+
+  test-windows:
+    needs: [source, windows-sign]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: windows-latest, arch: x86_64}
+          - {runner: windows-11-arm, arch: aarch64}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-windows-${{ matrix.arch }}
+      - name: Test both executable names and verify signatures
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.source.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          SIGNED: ${{ needs.source.outputs.sign }}
+          EXPECTED_SUBJECT: ${{ secrets.AZURE_SIGN_PUBLISHER }}
+        run: |
+          Expand-Archive "computer-use-$env:VERSION-windows-$env:ARCH.zip" unpacked
+          Set-Location unpacked
+          $exe = Get-FileHash computer-use.exe
+          $alias = Get-FileHash cua-driver.exe
+          if ($exe.Hash -ne $alias.Hash) { throw 'Executable copies differ' }
+          if ($env:SIGNED -eq 'true') {
+              $sdk = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10/bin'
+              $signTool = Get-ChildItem $sdk -Recurse -Filter signtool.exe |
+                  Where-Object { $_.Directory.Name -eq 'x64' } |
+                  Sort-Object FullName -Descending | Select-Object -First 1
+              if (-not $signTool) { throw 'Windows SDK signtool was not found' }
+              foreach ($file in @('computer-use.exe', 'cua-driver.exe')) {
+                  $sig = Get-AuthenticodeSignature $file
+                  Write-Host "$file $($sig.Status) $($sig.SignerCertificate.Subject)"
+                  if ($sig.Status -ne 'Valid') { throw "Invalid signature for $file" }
+                  if ($env:EXPECTED_SUBJECT -and $sig.SignerCertificate.GetNameInfo('SimpleName', $false) -ne ($env:EXPECTED_SUBJECT -replace '^CN=', '')) {
+                      throw "Unexpected certificate subject for $file"
+                  }
+                  & $signTool.FullName verify /pa /v $file
+                  if ($LASTEXITCODE) { throw "signtool failed for $file" }
+              }
+          }
+          $main = ./computer-use.exe --version
+          if ($LASTEXITCODE) { throw 'computer-use exited unsuccessfully' }
+          $compat = ./cua-driver.exe --version
+          if ($LASTEXITCODE -or $main -ne $compat) { throw 'Compatibility version differs' }
+          Write-Host $main
+          ./computer-use.exe doctor
+          if ($LASTEXITCODE) { throw 'doctor exited unsuccessfully' }
+
+  test-macos:
+    needs: [source, macos-sign]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-latest, arch: arm64}
+          - {runner: macos-15-intel, arch: x86_64}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-macos-${{ matrix.arch }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-macos-universal
+      - name: Test native and universal apps
+        env:
+          VERSION: ${{ needs.source.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          SIGNED: ${{ needs.source.outputs.sign }}
+        run: |
+          [[ $(uname -m) == "$ARCH" ]]
+          for variant in "$ARCH" universal; do
+            mkdir "$variant"
+            tar -xzf "computer-use-$VERSION-darwin-$variant.tar.gz" -C "$variant"
+            app="$variant/ComputerUse.app"
+            main="$app/Contents/MacOS/computer-use"
+            [[ $("$main" --version) == "$("$app/Contents/MacOS/cua-driver" --version)" ]]
+            if [[ "$SIGNED" == true ]]; then
+              codesign --verify --deep --strict --verbose=2 "$app"
+              codesign -dvv "$app" 2>&1 | grep -Fx 'TeamIdentifier=NCFFSNX26D'
+              spctl -a -vv -t exec "$app"
+              xcrun stapler validate "$app"
+            fi
+            "$main" doctor --json > "doctor-$variant.json"
+            cat "doctor-$variant.json"
+            python3 - "doctor-$variant.json" <<'PYTHON'
+          import json
+          import sys
+          with open(sys.argv[1]) as report:
+              probes = {probe["label"]: probe for probe in json.load(report)["probes"]}
+          for label in ("Accessibility", "Screen Recording"):
+              assert probes[label]["message"] in {"permission missing", "permission granted"}
+          PYTHON
+          done
+      - uses: forge-ci/setup-soldr@01e9101565638f03588327a3cb7b6ccecfe5a099
+        with:
+          toolchain-file: rust/rust-toolchain.toml
+      - name: Run macOS unit tests
+        working-directory: rust
+        run: soldr cargo test --locked -p platform-macos --lib
+
+  publish:
+    needs: [source, test-linux, test-windows, test-macos]
+    if: needs.source.outputs.sign == 'true' && (github.event_name == 'push' || inputs.publish)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: release-*
+          path: assets
+          merge-multiple: true
+      - name: Publish signed release
+        working-directory: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          VERSION: ${{ needs.source.outputs.version }}
+          PRERELEASE: ${{ github.event_name == 'push' || inputs.prerelease }}
+        run: |
+          archives=(computer-use-*.tar.gz computer-use-*.zip)
+          [[ ${#archives[@]} == 6 ]]
+          sha256sum "${archives[@]}" > SHA256SUMS
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          - Linux x86_64: `computer-use-<version>-linux-x86_64/computer-use`. The same directory contains the `cua-driver`, `cua-cursor-theme`, and `cua-perception` symlinks and `wayland-helper/`.
+          - macOS arm64, x86_64, and universal: `ComputerUse.app/Contents/MacOS/computer-use` and the `cua-driver`, `cua-cursor-theme`, and `cua-perception` symlinks in that directory.
+          - Windows x86_64 and aarch64: `computer-use.exe` and its identical signed copy `cua-driver.exe` at the archive root. The UI Automation applet may be unable to interact with elevated windows.
+          NOTES
+          args=(--target "$SOURCE_SHA" --notes-file "$RUNNER_TEMP/release-notes.md")
+          if [[ "$PRERELEASE" == true ]]; then args+=(--prerelease); fi
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then args+=(--verify-tag); fi
+          gh release create "computer-use-v$VERSION" "${args[@]}" "${archives[@]}" SHA256SUMS

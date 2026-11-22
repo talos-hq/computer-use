@@ -111,9 +111,10 @@ fn misspelled_options_exit_64_without_touching_the_daemon() {
         exit_code(home.path(), &["sessions", "--socket", &socket, "--json"]),
         Some(0)
     );
+    // A recognized channel command reaches the standalone updater refusal.
     assert_eq!(
         exit_code(home.path(), &["channel", "status", "--json"]),
-        Some(0)
+        Some(1)
     );
 
     assert_usage_error(

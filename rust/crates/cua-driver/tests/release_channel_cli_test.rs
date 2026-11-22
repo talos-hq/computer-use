@@ -12,64 +12,37 @@ fn run(home: &std::path::Path, args: &[&str]) -> std::process::Output {
         .expect("run cua-driver")
 }
 
-#[test]
-fn channel_cli_persists_and_reports_the_selected_channel() {
-    let home = tempfile::tempdir().expect("temp home");
-
-    let initial = run(home.path(), &["channel", "status", "--json"]);
+fn assert_disabled(output: std::process::Output) -> serde_json::Value {
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let state: serde_json::Value = serde_json::from_slice(&output.stdout).expect("update response");
+    assert!(state["selected_channel"].is_null(), "{state}");
     assert!(
-        initial.status.success(),
-        "{}",
-        String::from_utf8_lossy(&initial.stderr)
+        state["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("stable/nightly channels are disabled")),
+        "{state}"
     );
-    let initial: serde_json::Value = serde_json::from_slice(&initial.stdout).expect("initial json");
-    assert_eq!(initial["selected_channel"], "stable");
-
-    let changed = run(home.path(), &["channel", "set", "nightly", "--json"]);
-    assert!(
-        changed.status.success(),
-        "{}",
-        String::from_utf8_lossy(&changed.stderr)
-    );
-    assert_eq!(
-        std::fs::read_to_string(home.path().join("release-channel")).expect("saved preference"),
-        "nightly\n"
-    );
-
-    let status = run(home.path(), &["channel", "status", "--json"]);
-    assert!(
-        status.status.success(),
-        "{}",
-        String::from_utf8_lossy(&status.stderr)
-    );
-    let status: serde_json::Value = serde_json::from_slice(&status.stdout).expect("status json");
-    assert_eq!(status["selected_channel"], "nightly");
-
-    let restored = run(home.path(), &["channel", "set", "stable", "--json"]);
-    assert!(
-        restored.status.success(),
-        "{}",
-        String::from_utf8_lossy(&restored.stderr)
-    );
-    assert_eq!(
-        std::fs::read_to_string(home.path().join("release-channel")).expect("saved preference"),
-        "stable\n"
-    );
+    state
 }
 
 #[test]
-fn channel_cli_fails_closed_on_invalid_saved_state() {
+fn disabled_channel_commands_do_not_create_a_preference() {
     let home = tempfile::tempdir().expect("temp home");
-    std::fs::write(home.path().join("release-channel"), "broken\n").expect("invalid state");
+    assert_disabled(run(home.path(), &["channel", "status", "--json"]));
+    assert_disabled(run(home.path(), &["channel", "set", "nightly", "--json"]));
+    assert!(!home.path().join("release-channel").exists());
+}
 
-    let output = run(home.path(), &["channel", "status", "--json"]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("expected `stable` or `nightly`"),
-        "{stderr}"
-    );
-    assert!(stderr.contains("channel set stable"), "{stderr}");
+#[test]
+fn disabled_channel_commands_leave_legacy_state_alone() {
+    let home = tempfile::tempdir().expect("temp home");
+    let preference = home.path().join("release-channel");
+    for legacy in ["nightly\n", "broken\n"] {
+        std::fs::write(&preference, legacy).expect("saved state");
+        assert_disabled(run(home.path(), &["channel", "status", "--json"]));
+        assert_disabled(run(home.path(), &["channel", "set", "stable", "--json"]));
+        assert_eq!(std::fs::read_to_string(&preference).unwrap(), legacy);
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -211,47 +184,26 @@ mod pacman {
     }
 
     #[test]
-    fn fake_path_pacman_cannot_disable_unmanaged_channel_switching() {
-        let executable = std::env::var_os("PACMAN_TEST_UNMANAGED_EXECUTABLE")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| env!("CARGO_BIN_EXE_computer-use").into());
+    fn disabled_updater_ignores_pacman_on_path() {
+        let executable = std::path::Path::new(env!("CARGO_BIN_EXE_computer-use"));
         let root = fixture();
-        let output = command(
-            &executable,
+        assert_disabled(command(
+            executable,
             root.path(),
             &["channel", "set", "stable", "--json"],
+        ));
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("release-channel")).unwrap(),
+            "nightly\n"
         );
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let state: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(state["selected_channel"], "stable");
-        // A young cache written by this exact build is honoured; the cache is
-        // bound to the build that wrote it, so seed it as such.
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        std::fs::write(
-            root.path().join(".cua-driver/version_check.json"),
-            serde_json::json!({
-                "latest_version": "999.0.0",
-                "channel": "stable",
-                "last_checked_unix": now,
-                "checked_by_version": env!("CARGO_PKG_VERSION"),
-            })
-            .to_string(),
-        )
-        .unwrap();
-        let output = command(&executable, root.path(), &["check-update", "--json"]);
-        assert!(output.status.success());
-        let state: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(state["update_available"], true);
-        assert_eq!(state["cache_hit"], true);
-        assert_eq!(state["latest_version"], "999.0.0");
-        assert!(state["error"].is_null());
+        let state = assert_disabled(command(
+            executable,
+            root.path(),
+            &["check-update", "--json"],
+        ));
+        assert_eq!(state["update_available"], false);
+        assert_eq!(state["cache_hit"], false);
+        assert!(state["install_command"].is_null());
         assert!(!root.path().join("fake-pacman-called").exists());
     }
 

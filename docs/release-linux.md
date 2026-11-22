@@ -71,3 +71,19 @@ archive before publication, pass `--arg src /absolute/path/to/release.tar.gz`.
 
 The Nix package targets Linux x86_64. The portable archives support native
 Linux builds on x86_64 and aarch64.
+
+## PyPI distribution
+
+The `clud-computer-use` platform wheels carry the unchanged Computer Use release
+archives. Both launcher names use the native executable.
+
+```sh
+uv tool run --from clud-computer-use==0.57.2 clud-computer-use --version
+uv tool run --from clud-computer-use==0.57.2 computer-use doctor
+```
+
+The release workflow verifies the archived payloads against the published
+`SHA256SUMS` before building wheels. To build wheels for an existing release,
+dispatch `release.yml` with `wheel-release` set to its version. To publish from
+`main`, also set `publish-wheels`. PyPI Trusted Publishing uses repository
+`talos-hq/computer-use`, workflow `release.yml` and environment `pypi`.

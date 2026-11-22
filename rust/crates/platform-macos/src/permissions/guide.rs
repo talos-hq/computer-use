@@ -577,7 +577,7 @@ mod tests {
                 home
             ),
             Some(PathBuf::from(
-                "/Users/u/Library/Caches/CuaDriver/permission-guide.json"
+                "/Users/u/Library/Caches/ComputerUse/permission-guide.json"
             ))
         );
         assert_eq!(

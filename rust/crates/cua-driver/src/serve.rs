@@ -4175,7 +4175,7 @@ mod permission_gate_tests {
         let (driver, sdk, calls) = crate::probe_sdk().await;
         let options = cua_driver_sdk::TrustedSessionOptions {
             public_session: "pending-trusted".into(),
-            mode: cua_driver_sdk::SessionPermissionMode::Standard,
+            mode: cua_driver_sdk::SessionPermissionMode::Unrestricted,
             ttl_seconds: 60,
             idle_ttl_seconds: 30,
             capability_manifest_path: None,
@@ -4316,7 +4316,7 @@ mod permission_gate_tests {
             Some(
                 serde_json::to_value(cua_driver_sdk::TrustedSessionOptions {
                     public_session: "pending-trusted-socket".into(),
-                    mode: cua_driver_sdk::SessionPermissionMode::Standard,
+                    mode: cua_driver_sdk::SessionPermissionMode::Unrestricted,
                     ttl_seconds: 60,
                     idle_ttl_seconds: 30,
                     capability_manifest_path: None,

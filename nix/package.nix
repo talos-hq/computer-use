@@ -8,8 +8,7 @@ in pkgs.stdenvNoCC.mkDerivation {
   inherit version;
   src = if src != null then src else pkgs.fetchurl {
     url = "https://github.com/talos-hq/computer-use/releases/download/computer-use-v${version}/computer-use-${version}-linux-x86_64.tar.gz";
-    # Filled with the locally validated archive before publishing the release.
-    sha256 = pkgs.lib.fakeSha256;
+    sha256 = "f3bc572cd00e6e9a07177cd8e8554e26b754b97aa20a592f27464e1daf81085f";
   };
   nativeBuildInputs = [ pkgs.autoPatchelfHook pkgs.makeWrapper ];
   buildInputs = [ pkgs.stdenv.cc.cc.lib ];

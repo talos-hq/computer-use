@@ -406,46 +406,7 @@ fn ui_automation_probe_from(result: Result<(), String>, degraded: bool) -> Probe
     }
 }
 
-/// Run `gdbus introspect` against the AT-SPI accessibility bus and report
-/// whether it returned success within `timeout`. Any of: spawn failure,
-/// timeout elapsed, non-zero exit — all collapse to `false` (the caller
-/// only cares about reachability, not the failure mode).
-///
-/// Kept separate from `append_platform_probes` so it's straightforward to
-/// unit-test the timeout path without invoking the full doctor run.
-#[cfg(target_os = "linux")]
-fn probe_at_spi_bus_via_gdbus(timeout: std::time::Duration) -> bool {
-    use std::process::{Command, Stdio};
-
-    let mut child = match Command::new("gdbus")
-        .args([
-            "introspect",
-            "--session",
-            "--dest",
-            "org.a11y.Bus",
-            "--object-path",
-            "/org/a11y/bus",
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    match wait_for_child(&mut child, timeout) {
-        Ok(Some(status)) => status.success(),
-        Ok(None) | Err(_) => {
-            // Timed out or failed — kill the stuck child so we don't leave a
-            // gdbus process hanging around after `doctor` exits.
-            let _ = child.kill();
-            let _ = child.wait();
-            false
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
+#[cfg(all(test, target_os = "linux"))]
 fn wait_for_child(
     child: &mut std::process::Child,
     timeout: std::time::Duration,
@@ -523,37 +484,42 @@ fn append_platform_probes(report: &mut Report) {
         )),
     }
 
-    // AT-SPI bus probe. We don't link D-Bus directly — instead, check for
-    // the AT_SPI_BUS env var which the at-spi daemon advertises when
-    // running, and fall back to checking gdbus's view of the
-    // org.a11y.Bus name.
-    let at_spi_env = std::env::var("AT_SPI_BUS").ok().filter(|v| !v.is_empty());
-    match at_spi_env {
-        Some(addr) => report.push(Probe::ok(
-            "AT-SPI",
-            format!("bus address present (AT_SPI_BUS={addr})"),
-        )),
-        None => {
-            // Bounded wait — a hung session bus daemon would otherwise
-            // block `doctor` indefinitely. 3s is enough for a healthy
-            // gdbus introspect to complete (single round-trip on the
-            // session bus) and short enough that a stuck bus surfaces
-            // as a warning instead of looking like the binary froze.
-            let bus_ok = probe_at_spi_bus_via_gdbus(std::time::Duration::from_secs(3));
-            if bus_ok {
+    if platform_linux::wayland::is_wayland()
+        && platform_linux::wayland::kwin_script::may_be_session()
+    {
+        match platform_linux::wayland::kwin_script::infos() {
+            Ok(windows) => {
                 report.push(Probe::ok(
-                    "AT-SPI",
-                    "org.a11y.Bus reachable via session bus",
+                    "window enumeration",
+                    format!(
+                        "KWin D-Bus scripting (UUID/PID), {} windows; no compiled plugin required",
+                        windows.len()
+                    ),
                 ));
-            } else {
-                report.push(
-                    Probe::warn("AT-SPI", "accessibility bus not reachable")
-                        .with_detail(
-                            "install at-spi2-core and ensure the user session has D-Bus running for get_window_state to work.",
-                        ),
-                );
+                report.push(if platform_linux::wayland::PORTAL_INPUT_ENABLED {
+                    match platform_linux::wayland::kwin_script::remote_desktop_status() {
+                        Ok(portal) => Probe::ok("targeted input", format!("KWin activate + verify + shared libei + verify (foreground); restore_focus optional; {portal}; focus race remains, application effect unverified")),
+                        Err(error) => Probe::warn("targeted input", format!("KWin scripting available, but shared libei portal route is unavailable: {error:#}")),
+                    }
+                } else {
+                    Probe::warn("targeted input", "KWin enumeration works, but this build lacks portal-input")
+                });
             }
+            Err(error) => report.push(Probe::warn(
+                "KWin scripting",
+                format!("unavailable: {error:#}"),
+            )),
         }
+    }
+    match platform_linux::atspi::status::probe() {
+        Ok(status) => report.push(Probe::ok("AT-SPI", status)),
+        Err(error) => report.push(
+            Probe::warn(
+                "AT-SPI",
+                format!("accessibility bus/registry unavailable: {error:#}"),
+            )
+            .with_detail(platform_linux::atspi::status::SETUP_HINT),
+        ),
     }
 }
 

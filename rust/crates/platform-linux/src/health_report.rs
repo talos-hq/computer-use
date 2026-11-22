@@ -489,8 +489,7 @@ fn classify_wayland_backend(
                      refuses foreground dispatch."
                 ),
                 "On GNOME, install and enable the bundled WinRects Shell helper, then \
-                 log out and back in. KDE foreground input remains unavailable until \
-                 a target-addressable KWin activation adapter is installed; AX actions \
+                 log out and back in. KDE needs its KWin D-Bus scripting interface enabled; AX actions \
                  and exact background refusals remain usable.",
             );
         }
@@ -558,8 +557,7 @@ fn probe_x11_connect() -> bool {
     false
 }
 
-pub(crate) const START_ATSPI_BUS_HINT: &str = "Start the AT-SPI bus \
-    (`/usr/libexec/at-spi-bus-launcher`) or enable accessibility in your desktop's settings.";
+pub(crate) const START_ATSPI_BUS_HINT: &str = "NixOS: enable services.gnome.at-spi2-core.enable = true; (also on Plasma). Install at-spi2-core elsewhere; launch Qt apps with QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 if needed.";
 
 /// Probe whether `org.a11y.Bus` is reachable on the session bus — the
 /// canonical AT-SPI prerequisite on Wayland, where there is no X server to
@@ -567,32 +565,7 @@ pub(crate) const START_ATSPI_BUS_HINT: &str = "Start the AT-SPI bus \
 /// timeout, etc.) so the doctor message stays simple.
 #[cfg(target_os = "linux")]
 pub(crate) fn probe_a11y_bus() -> bool {
-    use atspi::zbus;
-    let rt = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(_) => return false,
-    };
-    rt.block_on(async {
-        let bus = match zbus::Connection::session().await {
-            Ok(b) => b,
-            Err(_) => return false,
-        };
-        let proxy = match zbus::fdo::DBusProxy::new(&bus).await {
-            Ok(p) => p,
-            Err(_) => return false,
-        };
-        // `name_has_owner` is the cheap direct existence check — avoids
-        // pulling the entire session-bus name registry just to look up one
-        // entry. Matches the pattern in `wayland::portal_screenshot::probe_portal`.
-        let bus_name = match "org.a11y.Bus".try_into() {
-            Ok(n) => n,
-            Err(_) => return false,
-        };
-        proxy.name_has_owner(bus_name).await.unwrap_or(false)
-    })
+    crate::atspi::status::probe().is_ok()
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -645,7 +618,8 @@ fn portal_input_enabled() -> bool {
 
 #[cfg(target_os = "linux")]
 fn target_activation_available() -> bool {
-    crate::wayland::kwin_helper::available()
+    crate::wayland::kwin_script::infos().is_ok()
+        || crate::wayland::kwin_helper::available()
         || crate::wayland::shell_helper::list_windows(None).is_some()
 }
 

@@ -120,16 +120,22 @@ enum Cmd {
         x: f64,
         y: f64,
         button: Button,
+        action: Option<Arc<Action>>,
+        kwin_target: Option<super::kwin_script::Window>,
         reply: Sender<anyhow::Result<()>>,
     },
     MoveAbsolute {
         x: f64,
         y: f64,
+        action: Option<Arc<Action>>,
+        kwin_target: Option<super::kwin_script::Window>,
         reply: Sender<anyhow::Result<()>>,
     },
     Scroll {
         dx: f64,
         dy: f64,
+        action: Option<Arc<Action>>,
+        kwin_target: Option<super::kwin_script::Window>,
         reply: Sender<anyhow::Result<()>>,
     },
     TypeText {
@@ -138,14 +144,19 @@ enum Cmd {
         ticket: Arc<TextTicket>,
         /// The tool call this text serves: nothing goes out once it is over.
         action: Option<Arc<Action>>,
+        kwin_target: Option<super::kwin_script::Window>,
         reply: Sender<anyhow::Result<()>>,
     },
     PressKey {
         keycode: u32,
+        action: Option<Arc<Action>>,
+        kwin_target: Option<super::kwin_script::Window>,
         reply: Sender<anyhow::Result<()>>,
     },
     KeySequence {
         transitions: Vec<KeyTransition>,
+        action: Option<Arc<Action>>,
+        kwin_target: Option<super::kwin_script::Window>,
         reply: Sender<anyhow::Result<()>>,
     },
     Drag {
@@ -156,6 +167,8 @@ enum Cmd {
         steps: u32,
         duration_ms: u64,
         button: Button,
+        action: Option<Arc<Action>>,
+        kwin_target: Option<super::kwin_script::Window>,
         reply: Sender<anyhow::Result<()>>,
     },
     Shutdown,
@@ -313,6 +326,8 @@ pub fn click(x: f64, y: f64, button: Button) -> anyhow::Result<()> {
             x,
             y,
             button,
+            action: crate::input::action::current(),
+            kwin_target: super::kwin_input::captured_target(),
             reply: tx_r,
         })
         .map_err(|e| anyhow::anyhow!("libei worker channel closed: {e}"))?;
@@ -325,7 +340,13 @@ pub fn move_absolute(x: f64, y: f64) -> anyhow::Result<()> {
     ensure_started()?;
     let (tx_r, rx_r) = bounded(1);
     tx()?
-        .send(Cmd::MoveAbsolute { x, y, reply: tx_r })
+        .send(Cmd::MoveAbsolute {
+            x,
+            y,
+            reply: tx_r,
+            action: crate::input::action::current(),
+            kwin_target: super::kwin_input::captured_target(),
+        })
         .map_err(|e| anyhow::anyhow!("libei worker channel closed: {e}"))?;
     wait_for_reply(rx_r)
 }
@@ -338,6 +359,8 @@ pub fn scroll(dx: f64, dy: f64) -> anyhow::Result<()> {
         .send(Cmd::Scroll {
             dx,
             dy,
+            action: crate::input::action::current(),
+            kwin_target: super::kwin_input::captured_target(),
             reply: tx_r,
         })
         .map_err(|e| anyhow::anyhow!("libei worker channel closed: {e}"))?;
@@ -367,6 +390,7 @@ fn send_text(
             desktop,
             ticket: ticket.clone(),
             action: crate::input::action::current(),
+            kwin_target: super::kwin_input::captured_target(),
             reply: tx_r,
         })
         .map_err(|e| anyhow::anyhow!("libei worker channel closed: {e}"))?;
@@ -417,6 +441,8 @@ pub fn press_key(keycode: u32) -> anyhow::Result<()> {
     tx()?
         .send(Cmd::PressKey {
             keycode,
+            action: crate::input::action::current(),
+            kwin_target: super::kwin_input::captured_target(),
             reply: tx_r,
         })
         .map_err(|e| anyhow::anyhow!("libei worker channel closed: {e}"))?;
@@ -439,6 +465,8 @@ pub fn key_sequence(transitions: &[KeyTransition]) -> anyhow::Result<()> {
     tx()?
         .send(Cmd::KeySequence {
             transitions: transitions.to_vec(),
+            action: crate::input::action::current(),
+            kwin_target: super::kwin_input::captured_target(),
             reply: tx_r,
         })
         .map_err(|e| anyhow::anyhow!("libei worker channel closed: {e}"))?;
@@ -486,6 +514,8 @@ pub fn drag(
             steps,
             duration_ms,
             button,
+            action: crate::input::action::current(),
+            kwin_target: super::kwin_input::captured_target(),
             reply: tx_r,
         })
         .map_err(|e| anyhow::anyhow!("libei worker channel closed: {e}"))?;
@@ -947,10 +977,11 @@ impl EisState {
             desktop,
             ticket,
             action,
+            kwin_target,
             reply,
         } = cmd
         {
-            self.start_text(&text, desktop, ticket, action, reply);
+            self.start_text(&text, desktop, ticket, action, kwin_target, reply);
             return;
         }
         let result = self.run_command(&cmd);
@@ -994,6 +1025,51 @@ impl EisState {
     }
 
     fn run_command(&mut self, cmd: &Cmd) -> anyhow::Result<()> {
+        let (action, target) = match cmd {
+            Cmd::Click {
+                action,
+                kwin_target,
+                ..
+            }
+            | Cmd::MoveAbsolute {
+                action,
+                kwin_target,
+                ..
+            }
+            | Cmd::Scroll {
+                action,
+                kwin_target,
+                ..
+            }
+            | Cmd::PressKey {
+                action,
+                kwin_target,
+                ..
+            }
+            | Cmd::KeySequence {
+                action,
+                kwin_target,
+                ..
+            }
+            | Cmd::Drag {
+                action,
+                kwin_target,
+                ..
+            } => (action.clone(), kwin_target.as_ref()),
+            _ => (None, None),
+        };
+        let _bound = action.map(crate::input::action::bind);
+        if let Some(target) = target {
+            super::kwin_input::check(target)?;
+        }
+        if matches!(cmd, Cmd::Drag { .. }) {
+            self.run_command_unchecked(cmd)
+        } else {
+            crate::input::action::admit(|| self.run_command_unchecked(cmd))?
+        }
+    }
+
+    fn run_command_unchecked(&mut self, cmd: &Cmd) -> anyhow::Result<()> {
         match cmd {
             Cmd::WaitReady { interface, .. } => {
                 self.device_with_interface(interface).ok_or_else(|| {
@@ -1021,6 +1097,7 @@ impl EisState {
                 steps,
                 duration_ms,
                 button,
+                kwin_target,
                 ..
             } => {
                 let device = self.pointer_device_for(*from_x, *from_y)?;
@@ -1039,33 +1116,47 @@ impl EisState {
                 let (from_rx, from_ry) = (*from_x as f32, *from_y as f32);
                 let (to_rx, to_ry) = (*to_x as f32, *to_y as f32);
 
-                ptr_abs.motion_absolute(from_rx, from_ry);
-                device.frame(serial, event_time_us());
-                btn.button(button.to_evdev(), reis::ei::button::ButtonState::Press);
-                device.frame(serial, event_time_us());
-                if let Some(context) = self.context.as_ref() {
-                    let _ = context.flush();
-                }
+                crate::input::action::admit(|| {
+                    ptr_abs.motion_absolute(from_rx, from_ry);
+                    device.frame(serial, event_time_us());
+                    btn.button(button.to_evdev(), reis::ei::button::ButtonState::Press);
+                    device.frame(serial, event_time_us());
+                    if let Some(context) = self.context.as_ref() {
+                        let _ = context.flush();
+                    }
+                })?;
                 // Bound the interpolation: run_command executes synchronously in
                 // the worker loop, so a huge step count would block EIS event
                 // processing (incl. Ping) and balloon the unflushed request queue.
                 let n = (*steps).clamp(1, 500);
                 let delay = drag_step_delay(*duration_ms, n);
-                for s in 1..=n {
-                    let t = s as f32 / n as f32;
-                    let ix = from_rx + (to_rx - from_rx) * t;
-                    let iy = from_ry + (to_ry - from_ry) * t;
-                    ptr_abs.motion_absolute(ix, iy);
-                    device.frame(serial, event_time_us());
-                    if let Some(context) = self.context.as_ref() {
-                        let _ = context.flush();
+                let motions = (|| -> anyhow::Result<()> {
+                    for s in 1..=n {
+                        if let Some(target) = kwin_target {
+                            super::kwin_input::check(target)?;
+                        }
+                        let t = s as f32 / n as f32;
+                        let ix = from_rx + (to_rx - from_rx) * t;
+                        let iy = from_ry + (to_ry - from_ry) * t;
+                        crate::input::action::admit(|| {
+                            ptr_abs.motion_absolute(ix, iy);
+                            device.frame(serial, event_time_us());
+                            if let Some(context) = self.context.as_ref() {
+                                let _ = context.flush();
+                            }
+                        })?;
+                        if !delay.is_zero() {
+                            crate::interaction::pause(delay);
+                        }
                     }
-                    if !delay.is_zero() {
-                        crate::interaction::pause(delay);
-                    }
-                }
+                    Ok(())
+                })();
                 btn.button(button.to_evdev(), reis::ei::button::ButtonState::Released);
                 device.frame(serial, event_time_us());
+                if let Some(context) = self.context.as_ref() {
+                    let _ = context.flush();
+                }
+                motions?;
             }
             Cmd::MoveAbsolute { x, y, .. } => {
                 let device = self.pointer_device_for(*x, *y)?;
@@ -1207,6 +1298,7 @@ impl EisState {
         desktop: DesktopFacts,
         ticket: Arc<TextTicket>,
         action: Option<Arc<Action>>,
+        kwin_target: Option<super::kwin_script::Window>,
         reply: Sender<anyhow::Result<()>>,
     ) {
         if !ticket.begin() {
@@ -1224,6 +1316,7 @@ impl EisState {
                     unacknowledged: None,
                     ticket,
                     action,
+                    kwin_target,
                     reply,
                 });
                 self.advance_text();
@@ -1318,6 +1411,9 @@ impl EisState {
         };
         if Instant::now() < job.next_step_at {
             return Ok(false);
+        }
+        if let Some(target) = &job.kwin_target {
+            super::kwin_input::check(target)?;
         }
         let callback = match &job.action {
             Some(action) => action.admit(|| self.send_text_step(step))??,
@@ -1505,6 +1601,7 @@ struct TextJob {
     unacknowledged: Option<(reis::ei::Callback, Instant, usize)>,
     ticket: Arc<TextTicket>,
     action: Option<Arc<Action>>,
+    kwin_target: Option<super::kwin_script::Window>,
     reply: Sender<anyhow::Result<()>>,
 }
 
@@ -1527,10 +1624,15 @@ impl TextJob {
         let (done, total) = (self.done, self.total);
         match &self.unacknowledged {
             None if done == 0 => error,
-            None => anyhow::anyhow!("type_text stopped after {done} of {total} characters: {error:#}"),
-            Some((_, _, chars)) => anyhow::anyhow!(
-                "type_text stopped after {done} of {total} characters, and the next {chars} may have gone out: {error:#}"
-            ),
+            None => {
+                let detail =
+                    format!("type_text stopped after {done} of {total} characters: {error:#}");
+                error.context(detail)
+            }
+            Some((_, _, chars)) => {
+                let detail = format!("type_text stopped after {done} of {total} characters, and the next {chars} may have gone out: {error:#}");
+                error.context(detail)
+            }
         }
     }
 }
@@ -2085,6 +2187,26 @@ pub(super) mod local_eis {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn kwin_worker_focus_failure_survives_partial_text_context() {
+        let job = super::TextJob {
+            total: 2,
+            done: 1,
+            steps: Default::default(),
+            settle: std::time::Duration::ZERO,
+            next_step_at: std::time::Instant::now(),
+            unacknowledged: None,
+            ticket: std::sync::Arc::default(),
+            action: None,
+            kwin_target: None,
+            reply: crossbeam_channel::bounded(1).0,
+        };
+        let error = job.stopped(anyhow::Error::new(
+            super::super::kwin_input::TargetVerificationFailed,
+        ));
+        assert!(error.is::<super::super::kwin_input::TargetVerificationFailed>());
+        assert!(error.to_string().contains("after 1 of 2"));
+    }
     use super::*;
 
     #[test]
@@ -2166,6 +2288,28 @@ mod tests {
         let (result, events) = record(|| click(11_000.0, 50.0, Button::Left));
         result.unwrap();
         assert_eq!(events[0], motion("far", 11_000.0, 50.0));
+    }
+
+    #[test]
+    fn abandoned_nontext_actions_emit_no_input_from_the_worker_queue() {
+        let action = Action::new(Duration::from_secs(30));
+        action.abandon();
+        let (results, events) = record(|| {
+            let _bound = crate::input::action::bind(action);
+            vec![
+                move_absolute(100., 100.),
+                click(100., 100., Button::Left),
+                scroll(0., 10.),
+                press_key(28),
+                key_sequence(&[KeyTransition::Press(29), KeyTransition::Release(29)]),
+                drag(100., 100., 200., 200., 4, 0, Button::Left),
+            ]
+        });
+        assert!(results.into_iter().all(|result| result.is_err()));
+        assert!(
+            events.is_empty(),
+            "abandoned queued commands emitted {events:?}"
+        );
     }
 
     #[test]
@@ -2602,6 +2746,7 @@ mod typing_route_tests {
                     desktop: facts(true),
                     ticket,
                     action: None,
+                    kwin_target: None,
                     reply,
                 })
                 .unwrap();

@@ -245,6 +245,8 @@ async fn shared_connection() -> Result<&'static AccessibilityConnection> {
 /// (#4874).
 async fn connect_accessibility_bus(
 ) -> std::result::Result<AccessibilityConnection, atspi::AtspiError> {
+    // Activates the launcher, and enables its existing bridge without UI.
+    let _ = tokio::time::timeout(CALL_TIMEOUT, super::status::enable_and_connect()).await;
     if let Some(address) = session_accessibility_bus(std::env::var("AT_SPI_BUS_ADDRESS").ok()) {
         match address.parse() {
             Ok(parsed) => match AccessibilityConnection::from_address(parsed).await {
@@ -1337,7 +1339,8 @@ async fn resolve_window_frame(
     // Before the single-root shortcut: niri may list a window whose root is
     // not exported yet, and the one root then belongs to another window.
     let niri = !hyprland && crate::wayland::is_wayland() && crate::wayland::niri::is_session();
-    if hyprland || niri {
+    let kwin = crate::wayland::kwin_script::knows_window(xid);
+    if hyprland || niri || kwin {
         let (owned, target): (Vec<(String, u32, u32)>, usize) = if hyprland {
             let windows = crate::wayland::hyprland::list_windows().ok()?;
             let owned: Vec<_> = windows.iter().filter(|window| window.pid == pid).collect();
@@ -1345,6 +1348,17 @@ async fn resolve_window_frame(
             let owned = owned
                 .iter()
                 .map(|window| (window.title.clone(), window.width, window.height))
+                .collect();
+            (owned, target)
+        } else if kwin {
+            let windows = bounded_blocking(crate::wayland::kwin_script::list_windows)
+                .await?
+                .ok()?;
+            let owned: Vec<_> = windows.iter().filter(|w| w.pid == pid).collect();
+            let target = owned.iter().position(|w| w.id == xid)?;
+            let owned = owned
+                .iter()
+                .map(|w| (w.title.clone(), w.width, w.height))
                 .collect();
             (owned, target)
         } else {
@@ -1406,7 +1420,7 @@ async fn resolve_window_frame(
             .iter()
             .map(|(title, width, height)| (title.as_str(), *width, *height))
             .collect::<Vec<_>>();
-        return if niri {
+        return if niri || kwin {
             correlate_niri_frame(&frames, &clients, target, seeds.len())
         } else {
             correlate_hyprland_frame(&frames, &clients, target)
@@ -7163,6 +7177,8 @@ fn native_wayland_origin_attested(pid: u32, xid: u64) -> bool {
         && if crate::wayland::is_inject_mode() {
             crate::wayland::window_was_listed_for_pid(pid, xid)
                 && crate::wayland::inject_accessibility_offset(pid).is_some()
+        } else if crate::wayland::kwin_script::knows_window(xid) {
+            crate::wayland::kwin_script::window(xid, Some(pid)).is_ok_and(|window| window.native)
         } else if crate::wayland::hyprland::is_session() {
             crate::wayland::hyprland::native_client_attested(xid, pid)
         } else {
@@ -7348,6 +7364,11 @@ fn window_to_screen_offset(pid: u32, xid: u64, title: Option<&str>) -> Option<(i
 fn authoritative_wayland_origin(pid: u32, xid: u64, title: Option<&str>) -> Option<(i32, i32)> {
     if !crate::wayland::is_wayland() {
         return None;
+    }
+    if crate::wayland::kwin_script::knows_window(xid) {
+        return crate::wayland::kwin_script::window(xid, Some(pid))
+            .ok()
+            .map(|w| (w.client_x, w.client_y));
     }
     crate::wayland::inject_accessibility_offset(pid)
         .or_else(|| crate::wayland::sway_ipc::window_origin_for_pid(pid))
@@ -7714,6 +7735,9 @@ fn window_bound_element(
 /// The window-scope rule for a walk of window `xid`. X11 and Hyprland keep
 /// their own routes.
 fn window_scope_proven(pid: u32, xid: u64, scoped_frame: Option<usize>) -> bool {
+    if crate::wayland::kwin_script::knows_window(xid) {
+        return scoped_frame.is_some();
+    }
     if !crate::wayland::is_wayland() || crate::wayland::hyprland::is_session() {
         return true;
     }
@@ -8213,6 +8237,24 @@ mod screen_extents_tests {
 #[cfg(test)]
 mod screen_override_tests {
     use super::{project_screen_extents, screen_answer_overrides_window};
+
+    #[test]
+    fn kwin_native_gtk_local_screen_bounds_lose_to_the_client_origin() {
+        let local = (20, 20, 480, 34);
+        // Native GTK3 on the live fixture's 1.5x output. These values
+        // are logical pixels; adding output scale again would be wrong.
+        assert!(!screen_answer_overrides_window(local, None, true));
+        assert_eq!(
+            project_screen_extents(local, (2443, 649), None),
+            Some((2463, 669, 480, 34))
+        );
+        // XWayland must retain its already-global Screen answer.
+        assert!(screen_answer_overrides_window(
+            (2463, 669, 480, 34),
+            None,
+            false
+        ));
+    }
 
     #[test]
     fn attested_origin_rejects_window_local_screen_answer() {

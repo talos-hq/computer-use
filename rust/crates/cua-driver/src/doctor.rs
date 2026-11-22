@@ -465,6 +465,19 @@ fn append_platform_probes(report: &mut Report) {
         )),
     }
 
+    for (name, result) in platform_linux::runtime_x11::diagnostics() {
+        report.push(match result {
+            Ok(()) => Probe::ok(name, "runtime library available"),
+            Err(error) => Probe::warn(name, "optional X11 input library unavailable")
+                .with_detail(format!("{error:#}")),
+        });
+    }
+    report.push(match platform_linux::keyboard_library_status() {
+        Ok(()) => Probe::ok("libxkbcommon.so.0", "runtime keyboard library available"),
+        Err(error) => Probe::warn("libxkbcommon.so.0", "keyboard layout support unavailable")
+            .with_detail(format!("{error:#}")),
+    });
+
     // X11 window enumeration probe. An empty result could mean either an
     // unreachable display or a healthy display with no top-level windows
     // open — `list_windows` doesn't distinguish the two — so the warning

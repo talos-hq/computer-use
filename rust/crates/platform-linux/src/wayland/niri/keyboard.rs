@@ -34,10 +34,10 @@ use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::fs::FileExt;
 use std::time::{Duration, Instant};
 
+use crate::runtime_xkb as xkb;
 use anyhow::{anyhow, bail, Context, Result};
 use wayland_client::protocol::{wl_callback, wl_keyboard, wl_registry, wl_seat};
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum};
-use xkbcommon::xkb;
 
 use super::super::text_keys::{
     chromium_receives, evdev_in, find_key, level_mods, refused, text_sym, with_line_feeds, xkb1,
@@ -287,7 +287,9 @@ fn same_key(
 /// An added key has one symbol, in one layout and level, and changes no
 /// modifier or layout.
 fn inert(map: &xkb::Keymap, code: xkb::Keycode) -> bool {
-    let mut state = xkb::State::new(map);
+    let Some(mut state) = xkb::State::new(map) else {
+        return false;
+    };
     state.update_key(code, xkb::KeyDirection::Down);
     map.num_layouts_for_key(code) == 1
         && map.num_levels_for_key(code, 0) == 1
@@ -298,7 +300,7 @@ fn inert(map: &xkb::Keymap, code: xkb::Keycode) -> bool {
 
 fn compile(map: &str) -> Result<xkb::Keymap> {
     let context =
-        xkb::Context::new(xkb::CONTEXT_NO_DEFAULT_INCLUDES | xkb::CONTEXT_NO_ENVIRONMENT_NAMES);
+        xkb::Context::new(xkb::CONTEXT_NO_DEFAULT_INCLUDES | xkb::CONTEXT_NO_ENVIRONMENT_NAMES)?;
     xkb::Keymap::new_from_string(
         &context,
         map.to_owned(),
@@ -312,7 +314,7 @@ fn compile(map: &str) -> Result<xkb::Keymap> {
 /// sets niri's modifier state outright, so nothing else is on when the key goes.
 fn find(xkb: &Xkb1, map: &xkb::Keymap, group: u32, sym: xkb::Keysym) -> Option<Key> {
     let (code, modifiers) = find_key(xkb, map, group, sym, |code, modifiers| {
-        let mut state = xkb::State::new(map);
+        let mut state = xkb::State::new(map)?;
         state.update_mask(modifiers, 0, 0, 0, 0, group);
         (state.key_get_one_sym(code) == sym).then_some((modifiers.count_ones(), modifiers))
     })?;
@@ -900,7 +902,7 @@ mod tests {
             <[Part; 1]>::try_from(plan_text(xkb1().unwrap(), US_DE, 0, "a→😀").unwrap()).unwrap();
         let extended = compile(part.extended.as_deref().unwrap()).unwrap();
         assert_eq!(part.keys[0].code, 30);
-        let state = xkb::State::new(&extended);
+        let state = xkb::State::new(&extended).unwrap();
         for (key, c) in part.keys.iter().zip("a→😀".chars()).skip(1) {
             let code = xkb::Keycode::new(key.code + 8);
             assert!(evdev_in(code, &CHROMIUM_CODES), "{c} on code {}", key.code);
@@ -931,7 +933,7 @@ mod tests {
         );
         let extended = compile(part.extended.as_deref().unwrap()).unwrap();
         assert_eq!(
-            xkb::State::new(&extended).key_get_one_sym(euro),
+            xkb::State::new(&extended).unwrap().key_get_one_sym(euro),
             text_sym(xkb1().unwrap(), '€').unwrap()
         );
         // German has it on AltGr+E, which every client receives.

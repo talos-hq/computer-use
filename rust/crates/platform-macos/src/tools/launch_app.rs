@@ -520,7 +520,10 @@ impl Tool for LaunchAppTool {
 }
 
 fn is_cua_driver_bundle_id(bundle_id: &str) -> bool {
-    matches!(bundle_id, "com.taloshq.computer-use" | "com.trycua.driver.local")
+    matches!(
+        bundle_id,
+        "com.taloshq.computer-use" | "com.trycua.driver.local"
+    )
 }
 
 fn protected_host_launch_refusal() -> ToolResult {

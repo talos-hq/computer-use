@@ -128,7 +128,14 @@ jobs:
           TARGET: ${{ matrix.arch }}-pc-windows-msvc
         run: |
           soldr build --target "$TARGET" --release --locked -p cua-driver --bin computer-use
-          install -D "target/$TARGET/release/computer-use.exe" ../unsigned/computer-use.exe
+          exe="target/$TARGET/release/computer-use.exe"
+          case "$TARGET" in
+            x86_64-*) machine=IMAGE_FILE_MACHINE_AMD64 ;;
+            aarch64-*) machine=IMAGE_FILE_MACHINE_ARM64 ;;
+          esac
+          llvm-readobj --file-headers "$exe" | grep -F "$machine"
+          llvm-readobj --coff-resources "$exe" | grep -E 'MANIFEST.*(ID|Type ID).*24'
+          install -D "$exe" ../unsigned/computer-use.exe
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: unsigned-windows-${{ matrix.arch }}
@@ -160,7 +167,9 @@ jobs:
           VERSION: ${{ needs.source.outputs.version }}
         run: |
           soldr build --target "$TARGET" --release --locked -p cua-driver --bin computer-use
-          ../scripts/package-macos.sh "target/$TARGET/release/computer-use" ../ComputerUse.app "$VERSION"
+          exe="target/$TARGET/release/computer-use"
+          lipo -verify_arch "$(uname -m)" "$exe"
+          ../scripts/package-macos.sh "$exe" ../ComputerUse.app "$VERSION"
           tar -cf ../ComputerUse.tar -C .. ComputerUse.app
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -296,6 +305,14 @@ jobs:
           files-folder-filter: exe
           file-digest: SHA256
           timestamp-digest: SHA256
+      - name: Verify the signed payload
+        if: needs.source.outputs.sign == 'true'
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature unsigned/computer-use.exe
+          if ($signature.Status -ne 'Valid') {
+              throw "Signing produced status $($signature.Status)"
+          }
       - name: Package the executable and identical alias
         shell: pwsh
         env:
@@ -464,7 +481,10 @@ jobs:
           linker: platform-default
       - name: Run macOS unit tests
         working-directory: rust
-        run: soldr cargo test --locked -p platform-macos --lib
+        run: |
+          soldr cargo test --locked -p platform-macos --lib
+          soldr cargo test --locked -p cua-driver --bin computer-use \
+            history_runtime::tests::release_history_requires_the_talos_signing_team
 
   publish:
     needs: [source, test-linux, test-windows, test-macos]

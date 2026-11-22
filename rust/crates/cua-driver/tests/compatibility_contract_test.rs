@@ -16,8 +16,16 @@ const MCP_FIXTURE: &str = include_str!("../../../../compat-fixtures/mcp.json");
 fn released_cli_help_and_manifest_fields_remain_compatible() {
     let fixture: Value = serde_json::from_str(CLI_FIXTURE).expect("valid CLI fixture");
     let executable = env!("CARGO_BIN_EXE_computer-use");
+    let install = tempfile::tempdir().expect("temporary compatibility install");
+    let alias = install
+        .path()
+        .join(format!("cua-driver{}", std::env::consts::EXE_SUFFIX));
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(executable, &alias).expect("create the release compatibility link");
+    #[cfg(windows)]
+    std::fs::copy(executable, &alias).expect("create the release compatibility copy");
 
-    let help = Command::new(executable)
+    let help = Command::new(&alias)
         .arg("--help")
         .output()
         .expect("run cua-driver --help");
@@ -28,7 +36,7 @@ fn released_cli_help_and_manifest_fields_remain_compatible() {
         assert!(help.contains(line), "CLI help no longer contains {line:?}");
     }
 
-    let manifest = Command::new(executable)
+    let manifest = Command::new(&alias)
         .arg("manifest")
         .output()
         .expect("run cua-driver manifest");

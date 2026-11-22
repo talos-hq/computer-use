@@ -15,7 +15,7 @@ HERE = Path(__file__).resolve().parent
 SUPPORTED = {
     "linux-x86_64.tar.gz": "manylinux_2_17_x86_64",
     "linux-aarch64.tar.gz": "manylinux_2_17_aarch64",
-    "darwin-universal.tar.gz": "macosx_11_0_universal2",
+    "darwin-universal.tar.gz": "macosx_13_0_universal2",
     "windows-x86_64.zip": "win_amd64",
     "windows-aarch64.zip": "win_arm64",
 }

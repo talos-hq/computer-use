@@ -611,8 +611,9 @@ jobs:
   publish-wheels:
     needs: build-wheels
     if: >-
-      github.event_name == 'push' ||
-      (github.ref == 'refs/heads/main' && inputs.publish-wheels)
+      !cancelled() && needs.build-wheels.result == 'success' &&
+      (github.event_name == 'push' ||
+       (github.ref == 'refs/heads/main' && inputs.publish-wheels))
     runs-on: ubuntu-24.04
     environment: pypi
     permissions:
@@ -622,4 +623,4 @@ jobs:
         with:
           name: clud-computer-use-wheels
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@106e0b0b7c337fa67ed433972f777c6357f78598 # v1.13.0
+      - uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0

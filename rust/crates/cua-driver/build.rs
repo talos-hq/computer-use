@@ -19,12 +19,13 @@ fn main() {
     println!("cargo:rerun-if-env-changed=CUA_DRIVER_REVIEW_EXTENSION_PUBLIC_KEY_BASE64");
     validate_review_trust_root_build();
 
-    #[cfg(target_os = "windows")]
-    {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS");
+    if target_os.as_deref() == Ok("windows") {
+        println!("cargo:rerun-if-changed=cua-driver.rc");
+        println!("cargo:rerun-if-changed=cua-driver.manifest");
         embed_resource::compile("cua-driver.rc", embed_resource::NONE);
     }
-
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
+    if target_os.as_deref() != Ok("macos") {
         return;
     }
     emit_sdk_framework_search_path();

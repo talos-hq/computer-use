@@ -107,6 +107,11 @@ jobs:
       - uses: forge-ci/setup-soldr@01e9101565638f03588327a3cb7b6ccecfe5a099
         with:
           toolchain-file: rust/rust-toolchain.toml
+      - name: Install the Windows resource compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm
+          llvm-config --bindir >> "$GITHUB_PATH"
       - name: Cross-build Windows MSVC
         working-directory: rust
         env:

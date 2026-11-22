@@ -175,7 +175,7 @@ jobs:
         run: |
           soldr build --target "$TARGET" --release --locked -p cua-driver --bin computer-use
           exe="target/$TARGET/release/computer-use"
-          lipo -verify_arch "$(uname -m)" "$exe"
+          lipo "$exe" -verify_arch "$(uname -m)"
           ../scripts/package-macos.sh "$exe" ../ComputerUse.app "$VERSION"
           tar -cf ../ComputerUse.tar -C .. ComputerUse.app
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -212,7 +212,7 @@ jobs:
           if [[ "$ARCH" == universal ]]; then
             exe=ComputerUse.app/Contents/MacOS/computer-use
             lipo -create "arm64/$exe" "x86_64/$exe" -output "$RUNNER_TEMP/computer-use"
-            lipo -verify_arch arm64 x86_64 "$RUNNER_TEMP/computer-use"
+            lipo "$RUNNER_TEMP/computer-use" -verify_arch arm64 x86_64
             install -m 0755 "$RUNNER_TEMP/computer-use" "arm64/$exe"
             mv arm64/ComputerUse.app package/
           else

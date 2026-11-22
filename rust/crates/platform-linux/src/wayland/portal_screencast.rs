@@ -6,9 +6,8 @@
 //! Reaches GNOME/Mutter and KDE/KWin, which expose no wlroots capture
 //! protocols to ordinary clients. Two primitives share one consent path:
 //!
-//! - [`ScreencastSession`] owns the portal side: create the session, select
-//!   sources, wait for the user's consent (or reuse a persisted restore
-//!   token), start the cast, and hand out the PipeWire remote fd plus node id.
+//! - [`ScreencastSession`] borrows the daemon-owned combined RemoteDesktop
+//!   session and hands out a PipeWire remote fd and the shared monitor node id.
 //! - [`run_frame_stream`] owns the PipeWire side: connect to the remote,
 //!   negotiate a raw BGRx/BGRA/RGBx/RGBA format, and deliver dequeued frames
 //!   to a [`FrameSink`] on the calling thread until the sink asks to stop.
@@ -17,16 +16,10 @@
 
 use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_void, CStr};
-use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
+use std::os::fd::{IntoRawFd, OwnedFd};
 use std::ptr;
 use std::time::{Duration, Instant};
 
-use ashpd::desktop::screencast::{
-    CursorMode, OpenPipeWireRemoteOptions, Screencast, SelectSourcesOptions, SourceType,
-    StartCastOptions, Streams,
-};
-use ashpd::desktop::{CreateSessionOptions, PersistMode, Session};
-use ashpd::enumflags2::BitFlags;
 use libspa::buffer::{ChunkFlags, Data};
 use libspa::param::format::{FormatProperties, MediaSubtype, MediaType};
 use libspa::param::video::{VideoFormat, VideoInfoRaw};
@@ -39,7 +32,6 @@ use libspa::utils::{Fraction, Rectangle, SpaTypes};
 use pipewire_sys as pw_sys;
 
 use super::libpipewire::{libpipewire, PipeWire};
-use super::portal::RestoreToken;
 
 /// How long to wait for the user to answer the portal's consent dialog when no
 /// valid restore token skips it.
@@ -49,144 +41,96 @@ pub const CONSENT_TIMEOUT: Duration = Duration::from_secs(60);
 /// portal that never replies fails the start instead of parking its caller.
 pub const PORTAL_CALL_TIMEOUT: Duration = Duration::from_secs(10);
 
-fn portal_unresponsive(step: &str) -> anyhow::Error {
-    anyhow::anyhow!(
-        "xdg-desktop-portal did not answer {step} within {}s",
-        PORTAL_CALL_TIMEOUT.as_secs()
-    )
-}
-
-/// A live portal ScreenCast session. The portal tears the cast down when the
-/// owning D-Bus connection goes away, so the session keeps its own runtime
-/// alive (one worker thread keeps the zbus connection driven, see #2105).
+/// A consumer of the daemon's combined RemoteDesktop monitor node.
+/// Dropping it ends only this PipeWire connection, never the portal session.
 pub struct ScreencastSession {
-    runtime: tokio::runtime::Runtime,
-    session: Session<Screencast>,
-    streams: Streams,
+    node_id: u32,
     fd: OwnedFd,
 }
 
 impl ScreencastSession {
-    /// Open a ScreenCast session for `sources`. When `restore` is given, the
-    /// persisted token is offered so the desktop can skip its consent dialog,
-    /// and the token the portal returns is persisted for the next session.
-    pub fn open(
-        sources: BitFlags<SourceType>,
-        restore: Option<RestoreToken>,
-        consent_timeout: Duration,
-    ) -> anyhow::Result<Self> {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()
-            .map_err(|e| anyhow::anyhow!("failed to build tokio runtime for ashpd: {e}"))?;
-        let (session, streams, fd) = runtime.block_on(async {
-            let saved_token = restore.and_then(RestoreToken::read);
-            let setup = tokio::time::timeout(PORTAL_CALL_TIMEOUT, async {
-                let connection = super::portal::fresh_session_connection().await?;
-                let proxy = Screencast::with_connection(connection).await.map_err(|e| {
-                    anyhow::anyhow!(
-                        "portal ScreenCast proxy unreachable: {e}. Install \
-                         xdg-desktop-portal-gnome / xdg-desktop-portal-kde."
-                    )
-                })?;
-                let session = proxy
-                    .create_session(CreateSessionOptions::default())
-                    .await
-                    .map_err(|e| anyhow::anyhow!("portal create_session failed: {e}"))?;
-
-                let mut select_opts = SelectSourcesOptions::default()
-                    .set_sources(sources)
-                    .set_multiple(false)
-                    .set_cursor_mode(CursorMode::Embedded)
-                    .set_persist_mode(PersistMode::ExplicitlyRevoked);
-                if let Some(token) = saved_token.as_deref() {
-                    select_opts = select_opts.set_restore_token(Some(token));
-                }
-                proxy
-                    .select_sources(&session, select_opts)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("portal select_sources failed: {e}"))?
-                    .response()
-                    .map_err(|e| anyhow::anyhow!("portal select_sources response error: {e}"))?;
-                anyhow::Ok((proxy, session))
-            });
-            let (proxy, session) = setup
-                .await
-                .map_err(|_| portal_unresponsive("the ScreenCast session setup"))??;
-
-            // `start` resolves only once the user answers the consent dialog
-            // (or the restore token skips it); bound that wait here.
-            let start = proxy.start(&session, None, StartCastOptions::default());
-            let streams = match tokio::time::timeout(consent_timeout, start).await {
-                Ok(request) => request
-                    .map_err(|e| anyhow::anyhow!("portal start failed: {e}"))?
-                    .response()
-                    .map_err(|e| {
-                        anyhow::anyhow!(
-                            "portal ScreenCast start was refused (consent denied or dialog dismissed): {e}"
-                        )
-                    })?,
-                Err(_) => {
-                    let _ = session.close().await;
-                    anyhow::bail!(
-                        "portal ScreenCast consent was not granted within {}s",
-                        consent_timeout.as_secs()
-                    );
-                }
-            };
-            if let (Some(restore), Some(token)) = (restore, streams.restore_token()) {
-                if saved_token.as_deref() != Some(token) {
-                    if let Err(error) = restore.write(token) {
-                        tracing::warn!("could not persist portal ScreenCast restore token: {error}");
-                    }
-                }
-            }
-
-            let remote = proxy.open_pipe_wire_remote(&session, OpenPipeWireRemoteOptions::default());
-            let fd = match tokio::time::timeout(PORTAL_CALL_TIMEOUT, remote).await {
-                Ok(fd) => fd.map_err(|e| anyhow::anyhow!("portal open_pipe_wire_remote failed: {e}"))?,
-                Err(_) => {
-                    let _ = session.close().await;
-                    return Err(portal_unresponsive("open_pipe_wire_remote"));
-                }
-            };
-            anyhow::Ok((session, streams, fd))
-        })?;
+    pub fn open() -> anyhow::Result<Self> {
+        let (fd, monitor) = super::portal_desktop::pipewire_stream()?;
+        if let Some(layout) = super::logical_desktop_layout()? {
+            let frame = layout.frame;
+            validate_monitor_geometry(
+                monitor.position,
+                monitor.size,
+                (frame.x, frame.y, frame.width, frame.height),
+                frame.outputs.len(),
+            )?;
+        }
         Ok(Self {
-            runtime,
-            session,
-            streams,
             fd,
+            node_id: monitor.node_id,
         })
     }
 
-    /// PipeWire node id of the first stream the portal published.
-    pub fn node_id(&self) -> anyhow::Result<u32> {
-        self.streams
-            .streams()
-            .first()
-            .map(|stream| stream.pipe_wire_node_id())
-            .ok_or_else(|| anyhow::anyhow!("portal advertised no ScreenCast streams"))
+    pub fn into_stream(self) -> (OwnedFd, u32) {
+        (self.fd, self.node_id)
     }
+}
 
-    /// An independently owned duplicate of the PipeWire remote fd, suitable for
-    /// `pw_context_connect_fd`, which consumes its fd.
-    pub fn pipewire_fd(&self) -> anyhow::Result<OwnedFd> {
-        let dup_fd = unsafe { libc::dup(self.fd.as_raw_fd()) };
-        if dup_fd < 0 {
-            anyhow::bail!(
-                "dup of portal PipeWire fd failed: {}",
-                std::io::Error::last_os_error()
-            );
+/// A monitor node cannot be stretched to a larger desktop action frame.
+/// Until portal stream composition is supported, fail clearly if the selected
+/// source covers only part of the desktop. Never fall back to another dialog.
+fn validate_monitor_geometry(
+    position: Option<(i32, i32)>,
+    size: Option<(i32, i32)>,
+    desktop: (i32, i32, u32, u32),
+    output_count: usize,
+) -> anyhow::Result<()> {
+    let (x, y, width, height) = desktop;
+    let position_matches = position.is_none_or(|position| position == (x, y));
+    let size_matches = size.is_none_or(|(w, h)| {
+        u32::try_from(w).ok() == Some(width) && u32::try_from(h).ok() == Some(height)
+    });
+    // KDE's combined desktop source supplies its full logical size but no
+    // position. A source as large as the bounding desktop cannot be a proper
+    // subset of that desktop; its origin is therefore the desktop origin.
+    let full_size_known = size.is_some();
+    anyhow::ensure!(
+        position_matches && size_matches && (full_size_known || output_count == 1),
+        "shared portal monitor does not cover the full desktop layout; multi-monitor portal composition is not supported (source position {position:?}, size {size:?}, desktop {desktop:?})"
+    );
+    Ok(())
+}
+
+/// A screenshot consumes a fresh frame from the shared monitor node. Only a
+/// portal unavailable before Start may fall back to the Screenshot portal.
+pub fn screenshot_from_shared_stream() -> anyhow::Result<Option<Vec<u8>>> {
+    super::portal_desktop::screenshot_route(
+        ScreencastSession::open(),
+        |session| {
+            let (fd, node_id) = session.into_stream();
+            let sink =
+                run_frame_stream(fd, node_id, StreamOptions::default(), ScreenshotSink(None))?;
+            sink.0
+                .ok_or_else(|| anyhow::anyhow!("shared monitor stream ended before a frame"))
+        },
+        super::portal_screenshot::screenshot_via_portal,
+    )
+}
+
+struct ScreenshotSink(Option<Vec<u8>>);
+
+impl FrameSink for ScreenshotSink {
+    fn frame(&mut self, frame: Frame<'_>) -> anyhow::Result<FrameFlow> {
+        let mut rgba = Vec::new();
+        frame.pack_rows(&mut rgba);
+        for pixel in rgba.chunks_exact_mut(4) {
+            if matches!(frame.format(), RawFormat::Bgrx | RawFormat::Bgra) {
+                pixel.swap(0, 2);
+            }
+            // A monitor capture is opaque, including formats with unused alpha.
+            pixel[3] = 255;
         }
-        Ok(unsafe { OwnedFd::from_raw_fd(dup_fd) })
-    }
-
-    /// End the cast. The compositor stops streaming as soon as the portal
-    /// session closes, so callers should stop consuming frames first.
-    pub fn close(self) {
-        let _ = self.runtime.block_on(self.session.close());
+        self.0 = Some(cua_driver_core::image_utils::encode_rgba_to_png(
+            &rgba,
+            frame.width(),
+            frame.height(),
+        )?);
+        Ok(FrameFlow::Stop)
     }
 }
 
@@ -935,6 +879,35 @@ pub fn run_frame_stream<S: FrameSink>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_monitor_must_cover_the_desktop_action_frame() {
+        // KDE combines all screens into one node and omits position.
+        assert!(validate_monitor_geometry(None, Some((3983, 1539)), (0, 0, 3983, 1539), 2).is_ok());
+        assert!(
+            validate_monitor_geometry(None, Some((1920, 1080)), (0, 0, 3840, 1080), 2).is_err()
+        );
+        assert!(validate_monitor_geometry(
+            Some((1920, 0)),
+            Some((1920, 1080)),
+            (0, 0, 3840, 1080),
+            2
+        )
+        .is_err());
+        assert!(
+            validate_monitor_geometry(Some((0, 0)), Some((1920, 1080)), (0, 0, 3840, 1080), 2)
+                .is_err()
+        );
+        assert!(validate_monitor_geometry(
+            Some((-1920, 0)),
+            Some((1920, 1080)),
+            (-1920, 0, 1920, 1080),
+            1
+        )
+        .is_ok());
+        assert!(validate_monitor_geometry(None, None, (0, 0, 3840, 1080), 2).is_err());
+        assert!(validate_monitor_geometry(None, None, (0, 0, 1920, 1080), 1).is_ok());
+    }
 
     #[test]
     fn frame_rejects_rows_narrower_than_its_width() {

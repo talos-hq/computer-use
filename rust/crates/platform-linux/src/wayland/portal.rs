@@ -21,21 +21,16 @@ pub(crate) async fn fresh_session_connection() -> anyhow::Result<zbus::Connectio
         .map_err(|e| anyhow::anyhow!("xdg-desktop-portal session bus unreachable: {e}"))
 }
 
-/// Per-install portal `restore_token` files. A token lets a portal session
-/// with `PersistMode::ExplicitlyRevoked` reuse the user's earlier consent, so
-/// the desktop shows the consent dialog once per install rather than once per
-/// process. Each portal purpose owns one token because the portal binds the
-/// token to the exact sources or devices that were selected.
+/// One restore token for combined RemoteDesktop input and ScreenCast capture.
+/// Old per-purpose tokens are intentionally ignored: upgrading may prompt once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(
     not(all(feature = "portal-input", feature = "portal-capture")),
     allow(dead_code)
 )]
 pub enum RestoreToken {
-    /// RemoteDesktop keyboard + pointer for the libei input backend.
-    RemoteDesktopInput,
-    /// ScreenCast monitor stream for full-desktop video recording.
-    ScreencastVideo,
+    /// Keyboard, pointer and monitor sources on the same RemoteDesktop session.
+    Desktop,
 }
 
 #[cfg_attr(
@@ -45,9 +40,7 @@ pub enum RestoreToken {
 impl RestoreToken {
     fn file_name(self) -> &'static str {
         match self {
-            // Historical name; renaming it would re-prompt every existing install.
-            Self::RemoteDesktopInput => "libei-persistent.token",
-            Self::ScreencastVideo => "screencast-video.token",
+            Self::Desktop => "desktop-session.token",
         }
     }
 
@@ -116,22 +109,17 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
-    fn restore_tokens_live_in_distinct_files_under_the_driver_config_dir() {
-        let base = Path::new("/cfg");
-        let input = restore_token_path_in(base, RestoreToken::RemoteDesktopInput);
-        let video = restore_token_path_in(base, RestoreToken::ScreencastVideo);
+    fn unified_restore_token_has_one_file_under_the_driver_config_dir() {
         assert_eq!(
-            input,
-            PathBuf::from("/cfg/cua-driver/libei-persistent.token")
+            restore_token_path_in(Path::new("/cfg"), RestoreToken::Desktop),
+            PathBuf::from("/cfg/cua-driver/desktop-session.token")
         );
-        assert_ne!(input, video);
-        assert_eq!(video.parent(), input.parent());
     }
 
     #[test]
     fn restore_token_roundtrips_trimmed_and_private() {
         let dir = tempfile::tempdir().unwrap();
-        let path = restore_token_path_in(dir.path(), RestoreToken::ScreencastVideo);
+        let path = restore_token_path_in(dir.path(), RestoreToken::Desktop);
 
         assert_eq!(read_restore_token_at(&path), None);
         write_restore_token_at(&path, "  tok-123 \n").unwrap();

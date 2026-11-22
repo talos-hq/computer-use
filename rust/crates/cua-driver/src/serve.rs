@@ -2860,12 +2860,15 @@ pub fn run_status_cmd(socket_path: &str, pid_file_path: Option<&str>) {
         if let Ok(response) = response {
             if let Some(status) = response.result {
                 println!(
-                    "  permission mode: {} ({})",
+                    "  permission mode: {} ({}; default: unrestricted)",
                     status["permission_mode"].as_str().unwrap_or("invalid"),
                     status["permission_mode_source"]
                         .as_str()
                         .unwrap_or("unknown source")
                 );
+                if let Some(reason) = status["permission_mode_override_reason"].as_str() {
+                    println!("  permission mode override: {reason}");
+                }
                 println!(
                     "  user policy: configured={}, active={}, valid={}",
                     status["user_policy_configured"].as_bool().unwrap_or(false),

@@ -33,6 +33,8 @@ pub(crate) use niri::AimedPoint;
 pub mod overlay;
 pub mod persistent_vptr;
 pub(crate) mod portal;
+#[cfg(feature = "portal-input")]
+pub(crate) mod portal_desktop;
 pub mod portal_screenshot;
 mod primary_seat;
 #[cfg(any(feature = "portal-input", test))]
@@ -54,6 +56,8 @@ pub(crate) mod portal_screencast;
 
 /// Whether the GNOME/KDE RemoteDesktop + libei input backend is compiled in.
 pub const PORTAL_INPUT_ENABLED: bool = cfg!(feature = "portal-input");
+/// Whether the PipeWire reader for the shared portal monitor is compiled in.
+pub const PORTAL_CAPTURE_ENABLED: bool = cfg!(feature = "portal-capture");
 
 use cua_driver_core::action_record::ActionTransport;
 use std::collections::{HashMap, HashSet};
@@ -121,16 +125,15 @@ fn current_foreground_target() -> Option<(u32, u64)> {
 
 pub use crate::desktop::ENABLE_WAYLAND_ENV;
 
-/// True when this is an opted-in Wayland desktop session
-/// ([`crate::desktop::Desktop::Wayland`]).
+/// True when this is a native Wayland desktop session
+/// ([`crate::desktop::Desktop::Wayland`]), enabled by default.
 ///
 /// The Wayland backend covers toplevel enumeration, per-output capture
 /// (native screencopy + a `grim` fallback), and virtual-pointer /
 /// virtual-keyboard input via the wlroots protocols. Per-window image
 /// capture still depends on the staging `ext-image-copy-capture-v1`
-/// protocol, so the backend stays OFF by default and a pure-Wayland
-/// session is reported as unsupported unless the user explicitly sets
-/// `CUA_DRIVER_RS_ENABLE_WAYLAND=1`.
+/// protocol. `CUA_DRIVER_RS_ENABLE_WAYLAND=0` retains the XWayland
+/// compatibility backend when explicitly requested.
 ///
 /// GNOME and KDE export `DISPLAY` for XWayland even when the target and the
 /// desktop are native Wayland, so `DISPLAY` never disables Wayland. Input
@@ -143,8 +146,8 @@ pub fn is_wayland() -> bool {
     )
 }
 
-/// Whether [`ENABLE_WAYLAND_ENV`] opts into the native Wayland backend,
-/// whatever the session.
+/// Whether startup configuration enables the native Wayland backend (default
+/// true), whatever the session.
 pub fn wayland_enabled() -> bool {
     crate::desktop::opted_in(std::env::var(ENABLE_WAYLAND_ENV).ok().as_deref())
 }
@@ -1418,6 +1421,11 @@ fn crop_png_to_rect(
 ///    after which the cascade continues.
 /// 6. X11: existing root-window path.
 pub fn screenshot_display_dispatch() -> anyhow::Result<Vec<u8>> {
+    #[cfg(feature = "portal-capture")]
+    if is_wayland() && portal_desktop::is_started() {
+        return portal_screencast::screenshot_from_shared_stream()?
+            .ok_or_else(|| anyhow::anyhow!("shared portal session lost its monitor stream"));
+    }
     if niri::is_session() {
         return niri_display_capture().map(|capture| capture.png);
     }
@@ -1470,7 +1478,7 @@ pub fn screenshot_display_dispatch() -> anyhow::Result<Vec<u8>> {
         }
         // Tier 5: xdg-desktop-portal (GNOME, KDE, COSMIC fallback), then X11.
         return portal_or_x11(
-            portal_screenshot::screenshot_via_portal,
+            desktop_portal_screenshot,
             crate::capture::screenshot_display_bytes_x11,
         );
     }
@@ -1558,6 +1566,17 @@ fn kwin_workspace_capture(
     capture()
         .inspect_err(|e| tracing::debug!("KWin workspace capture unavailable: {e:#}"))
         .ok()
+}
+
+/// Prefer the shared monitor node; a dead stream must never trigger another
+/// permission dialog. Only an unavailable RemoteDesktop portal permits fallback.
+fn desktop_portal_screenshot() -> anyhow::Result<Option<Vec<u8>>> {
+    #[cfg(feature = "portal-capture")]
+    {
+        return portal_screencast::screenshot_from_shared_stream();
+    }
+    #[cfg(not(feature = "portal-capture"))]
+    portal_screenshot::screenshot_via_portal()
 }
 
 /// The cascade tail: the portal tier, then the X11 root window. A portal

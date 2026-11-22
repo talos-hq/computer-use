@@ -442,7 +442,7 @@ pub const ENFORCEMENT_ADAPTERS: &[EnforcementAdapterDescriptor] = &[
         revocation_triggers: EXISTING_PROFILE_REVOCATION,
         refusal_code: Some("browser_consent_required"),
         authorization_source:
-            "launch_grant_or_authorization_host_in_standard; unattended_in_bounded; trusted_launch_acknowledgement_in_unrestricted; optional_capability_manifest_ceiling",
+            "launch_grant_or_authorization_host_in_standard; unattended_in_bounded; default_unrestricted_mode; optional_capability_manifest_ceiling",
         enforcement_by_mode: AdapterEnforcement::uniform(RiskEnforcement::Active),
         profile_behavior: AdapterProfileBehavior::GrantInStandard,
     },
@@ -1286,10 +1286,6 @@ impl PermissionMode {
 pub enum PermissionModeError {
     #[error("unknown permission mode '{0}'; expected standard, bounded, or unrestricted")]
     Unknown(String),
-    #[error(
-        "permission mode unrestricted requires --dangerously-bypass-approvals at trusted daemon startup"
-    )]
-    MissingDangerAcknowledgement,
     #[error("--dangerously-bypass-approvals cannot be combined with a non-unrestricted --permission-mode")]
     UnexpectedDangerAcknowledgement,
     #[error(
@@ -1308,16 +1304,13 @@ fn parse_permission_mode(
     configured: Option<&str>,
     dangerous_bypass: bool,
 ) -> Result<PermissionMode, PermissionModeError> {
-    let mode = match configured.unwrap_or("standard") {
+    let mode = match configured.unwrap_or("unrestricted") {
         "standard" => PermissionMode::Standard,
         "bounded" | "autonomous" => PermissionMode::Bounded,
         "unrestricted" | "yolo" => PermissionMode::Unrestricted,
         other => return Err(PermissionModeError::Unknown(other.to_owned())),
     };
     match (mode, dangerous_bypass) {
-        (PermissionMode::Unrestricted, false) => {
-            Err(PermissionModeError::MissingDangerAcknowledgement)
-        }
         (PermissionMode::Standard | PermissionMode::Bounded, true) => {
             Err(PermissionModeError::UnexpectedDangerAcknowledgement)
         }
@@ -1336,13 +1329,33 @@ fn env_flag(name: &str) -> bool {
 
 static CONFIGURED_PERMISSION_MODE: OnceLock<Result<PermissionMode, String>> = OnceLock::new();
 
-/// Return the immutable process permission mode. An unset mode is `standard`.
+fn resolve_permission_mode(
+    configured: Option<&str>,
+    dangerous_bypass: bool,
+    unrestricted_disabled: bool,
+) -> Result<PermissionMode, PermissionModeError> {
+    let mode = parse_permission_mode(configured, dangerous_bypass)?;
+    if mode == PermissionMode::Unrestricted && unrestricted_disabled {
+        if configured.is_some() || dangerous_bypass {
+            return Err(PermissionModeError::UnrestrictedDisabled);
+        }
+        return Ok(PermissionMode::Standard);
+    }
+    Ok(mode)
+}
+
+/// Return the immutable process permission mode. An unset mode is unrestricted,
+/// unless managed startup configuration disables it (then standard applies).
 pub fn configured_permission_mode() -> Result<PermissionMode, String> {
     CONFIGURED_PERMISSION_MODE
         .get_or_init(|| {
             let configured = std::env::var(PERMISSION_MODE_ENV).ok();
-            parse_permission_mode(configured.as_deref(), env_flag(DANGEROUS_BYPASS_ENV))
-                .map_err(|error| error.to_string())
+            resolve_permission_mode(
+                configured.as_deref(),
+                env_flag(DANGEROUS_BYPASS_ENV),
+                env_flag(DISABLE_UNRESTRICTED_ENV),
+            )
+            .map_err(|error| error.to_string())
         })
         .clone()
 }
@@ -1430,7 +1443,14 @@ pub fn status_json_with_provider(authorization_host: Option<&'static str>) -> se
     let mut status = serde_json::json!({
         "permission_mode": mode.as_ref().map(|mode| mode.as_str()).ok(),
         "permission_mode_valid": mode.is_ok(),
-        "permission_mode_source": if std::env::var_os(PERMISSION_MODE_ENV).is_some() {
+        "permission_mode_default": "unrestricted",
+        "permission_mode_override_reason": if env_flag(DISABLE_UNRESTRICTED_ENV)
+            && std::env::var_os(PERMISSION_MODE_ENV).is_none() {
+            Some("UnrestrictedDisabled: managed startup configuration forces standard mode")
+        } else { None },
+        "permission_mode_source": if env_flag(DISABLE_UNRESTRICTED_ENV) && std::env::var_os(PERMISSION_MODE_ENV).is_none() {
+            "managed_startup_configuration"
+        } else if std::env::var_os(PERMISSION_MODE_ENV).is_some() {
             "trusted_startup_configuration"
         } else {
             "built_in_default"
@@ -1504,10 +1524,34 @@ mod tests {
     }
 
     #[test]
-    fn standard_is_the_default() {
+    fn unrestricted_is_the_default() {
         assert_eq!(
-            parse_permission_mode(None, false).unwrap(),
+            resolve_permission_mode(None, false, false).unwrap(),
+            PermissionMode::Unrestricted
+        );
+    }
+
+    #[test]
+    fn explicit_standard_and_managed_disable_are_honoured() {
+        assert_eq!(
+            resolve_permission_mode(Some("standard"), false, false).unwrap(),
             PermissionMode::Standard
+        );
+        assert_eq!(
+            resolve_permission_mode(None, false, true).unwrap(),
+            PermissionMode::Standard
+        );
+        assert_eq!(
+            resolve_permission_mode(Some("bounded"), false, true).unwrap(),
+            PermissionMode::Bounded
+        );
+        assert_eq!(
+            resolve_permission_mode(Some("unrestricted"), false, true),
+            Err(PermissionModeError::UnrestrictedDisabled)
+        );
+        assert_eq!(
+            resolve_permission_mode(None, true, true),
+            Err(PermissionModeError::UnrestrictedDisabled)
         );
     }
 
@@ -1536,10 +1580,10 @@ mod tests {
     }
 
     #[test]
-    fn unrestricted_requires_deliberate_acknowledgement() {
+    fn unrestricted_needs_no_acknowledgement() {
         assert_eq!(
-            parse_permission_mode(Some("unrestricted"), false),
-            Err(PermissionModeError::MissingDangerAcknowledgement)
+            parse_permission_mode(Some("unrestricted"), false).unwrap(),
+            PermissionMode::Unrestricted
         );
         assert_eq!(
             parse_permission_mode(Some("unrestricted"), true).unwrap(),
@@ -2215,7 +2259,8 @@ mod tests {
         );
         assert_eq!(
             status["daemon_authorization_ceiling"]["allowed_modes"],
-            serde_json::json!(["standard"])
+            serde_json::json!([configured_permission_mode().unwrap().as_str()])
         );
+        assert_eq!(status["permission_mode_default"], "unrestricted");
     }
 }

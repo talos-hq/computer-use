@@ -1610,37 +1610,40 @@ async fn standalone_consumer_bind_without_grant_refuses_before_endpoint_discover
 
 #[tokio::test]
 async fn approved_existing_profile_attach_claims_then_binds_one_generation() {
-    // Match Chrome's per-instance toggle: the endpoint is discoverable only
-    // through the approved existing-profile route, never as driver-managed.
-    let (f, provider) = protected_existing_profile_fixture().await;
-    let prepare = BrowserPrepareTool::new(f.engine.clone())
-        .invoke(json!({
-            "pid": 1,
-            "window_id": 7,
-            "session": SESSION,
-            "_transport_session_id": "transport-v2-attach",
-            "strategy": { "kind": "existing_profile" }
-        }))
-        .await;
-    let prepared = structured(&prepare);
-    assert_eq!(prepared["status"], "ok", "{prepared}");
-    assert_eq!(prepared["action"], "attached_existing_profile");
-    assert_eq!(prepared["attachment"]["kind"], "existing_profile");
-    assert_eq!(prepared["attachment"]["capabilities_invalidated"], true);
-    assert_eq!(prepared["side_effects"]["displayed_consent_prompt"], false);
-    assert!(provider.consent_seen.load(Ordering::SeqCst));
-    assert!(!f.setup_invoked.load(Ordering::SeqCst));
+    crate::tool::with_test_permission_mode(crate::authorization::PermissionMode::Standard, async {
+        // Match Chrome's per-instance toggle: the endpoint is discoverable only
+        // through the approved existing-profile route, never as driver-managed.
+        let (f, provider) = protected_existing_profile_fixture().await;
+        let prepare = BrowserPrepareTool::new(f.engine.clone())
+            .invoke(json!({
+                "pid": 1,
+                "window_id": 7,
+                "session": SESSION,
+                "_transport_session_id": "transport-v2-attach",
+                "strategy": { "kind": "existing_profile" }
+            }))
+            .await;
+        let prepared = structured(&prepare);
+        assert_eq!(prepared["status"], "ok", "{prepared}");
+        assert_eq!(prepared["action"], "attached_existing_profile");
+        assert_eq!(prepared["attachment"]["kind"], "existing_profile");
+        assert_eq!(prepared["attachment"]["capabilities_invalidated"], true);
+        assert_eq!(prepared["side_effects"]["displayed_consent_prompt"], false);
+        assert!(provider.consent_seen.load(Ordering::SeqCst));
+        assert!(!f.setup_invoked.load(Ordering::SeqCst));
 
-    let state = GetBrowserStateTool::new(f.engine.clone())
-        .invoke(json!({
-            "pid": 1,
-            "window_id": 7,
-            "session": SESSION,
-            "_transport_session_id": "transport-v2-attach"
-        }))
-        .await;
-    assert_eq!(structured(&state)["status"], "ok", "{}", structured(&state));
-    crate::session::fire_session_end("transport-v2-attach");
+        let state = GetBrowserStateTool::new(f.engine.clone())
+            .invoke(json!({
+                "pid": 1,
+                "window_id": 7,
+                "session": SESSION,
+                "_transport_session_id": "transport-v2-attach"
+            }))
+            .await;
+        assert_eq!(structured(&state)["status"], "ok", "{}", structured(&state));
+        crate::session::fire_session_end("transport-v2-attach");
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -2036,39 +2039,66 @@ async fn existing_profile_sessions_share_one_browser_connection_across_session_e
 }
 
 #[tokio::test]
+async fn unrestricted_existing_profile_attachment_skips_protected_provider() {
+    crate::tool::with_test_permission_mode(
+        crate::authorization::PermissionMode::Unrestricted,
+        async {
+            let (f, provider) = protected_existing_profile_fixture().await;
+            let result = BrowserPrepareTool::new(f.engine.clone())
+                .invoke(json!({
+                    "pid": 1, "window_id": 7, "session": "unrestricted-profile",
+                    "strategy": {"kind": "existing_profile"}
+                }))
+                .await;
+            assert_eq!(
+                structured(&result)["status"],
+                "ok",
+                "{}",
+                structured(&result)
+            );
+            assert!(!provider.consent_seen.load(Ordering::SeqCst));
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn protected_provider_accepts_exact_attach_and_session_end_revokes_the_grant() {
-    const PROTECTED_SESSION: &str = "protected-provider-v2";
-    const PROTECTED_TRANSPORT: &str = "protected-transport-v2";
-    let (f, provider) = protected_existing_profile_fixture().await;
-    let prepare = BrowserPrepareTool::new(f.engine.clone())
-        .invoke(json!({
-            "pid": 1,
-            "window_id": 7,
-            "session": PROTECTED_SESSION,
-            "_transport_session_id": PROTECTED_TRANSPORT,
-            "strategy": { "kind": "existing_profile" }
-        }))
-        .await;
-    assert_eq!(
-        structured(&prepare)["status"],
-        "ok",
-        "{}",
-        structured(&prepare)
-    );
-    assert!(provider.consent_seen.load(Ordering::SeqCst));
+    crate::tool::with_test_permission_mode(crate::authorization::PermissionMode::Standard, async {
+        const PROTECTED_SESSION: &str = "protected-provider-v2";
+        const PROTECTED_TRANSPORT: &str = "protected-transport-v2";
+        let (f, provider) = protected_existing_profile_fixture().await;
+        let prepare = BrowserPrepareTool::new(f.engine.clone())
+            .invoke(json!({
+                "pid": 1,
+                "window_id": 7,
+                "session": PROTECTED_SESSION,
+                "_transport_session_id": PROTECTED_TRANSPORT,
+                "strategy": { "kind": "existing_profile" }
+            }))
+            .await;
+        assert_eq!(
+            structured(&prepare)["status"],
+            "ok",
+            "{}",
+            structured(&prepare)
+        );
+        assert!(provider.consent_seen.load(Ordering::SeqCst));
 
-    crate::session::fire_session_end(PROTECTED_TRANSPORT);
-    tokio::task::yield_now().await;
+        crate::session::fire_session_end(PROTECTED_TRANSPORT);
+        tokio::task::yield_now().await;
 
-    let state = GetBrowserStateTool::new(f.engine.clone())
-        .invoke(json!({
-            "pid": 1,
-            "window_id": 7,
-            "session": PROTECTED_SESSION,
-            "_transport_session_id": PROTECTED_TRANSPORT
-        }))
-        .await;
-    assert_eq!(structured(&state)["status"], "refused");
+        let state = GetBrowserStateTool::new(f.engine.clone())
+            .invoke(json!({
+                "pid": 1,
+                "window_id": 7,
+                "session": PROTECTED_SESSION,
+                "_transport_session_id": PROTECTED_TRANSPORT
+            }))
+            .await;
+        assert_eq!(structured(&state)["status"], "refused");
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -2372,43 +2402,46 @@ impl crate::consent::ProtectedConsentProvider for DecliningProtectedProvider {
 
 #[tokio::test]
 async fn declined_consent_rolls_back_pending_setup_before_refusing() {
-    let setup_aborted = Arc::new(AtomicBool::new(false));
-    let engine = BrowserEngine::new_with_protected_consent_provider(
-        Arc::new(FixturePlatform {
-            endpoint_state: None,
-            ws_url: "ws://127.0.0.1:9/devtools/browser".to_owned(),
-            trusted_input_limited: false,
-            managed_endpoint_visible: false,
-            process_role: BrowserProcessRole::StandaloneConsumer,
-            managed_discovery_invoked: Arc::new(AtomicBool::new(false)),
-            existing_endpoint_visible: Arc::new(AtomicBool::new(false)),
-            setup_invoked: Arc::new(AtomicBool::new(false)),
-            setup_aborted: setup_aborted.clone(),
-            stall_consent: false,
-            focus: Default::default(),
-        }),
-        Some(Arc::new(DecliningProtectedProvider)),
-    );
-    let refused = BrowserPrepareTool::new(engine)
-        .invoke(json!({
-            "pid": 1,
-            "window_id": 7,
-            "session": SESSION,
-            "strategy": { "kind": "existing_profile" }
-        }))
-        .await;
-    assert_eq!(
-        structured(&refused)["refusal"]["code"],
-        "browser_consent_required",
-        "{}",
-        structured(&refused)
-    );
-    // Checked before yielding: a rollback left to the Drop backstop would
-    // only be spawned, not finished, when the refusal returns.
-    assert!(
-        setup_aborted.load(Ordering::SeqCst),
-        "declined consent must roll back the pending setup before refusing"
-    );
+    crate::tool::with_test_permission_mode(crate::authorization::PermissionMode::Standard, async {
+        let setup_aborted = Arc::new(AtomicBool::new(false));
+        let engine = BrowserEngine::new_with_protected_consent_provider(
+            Arc::new(FixturePlatform {
+                endpoint_state: None,
+                ws_url: "ws://127.0.0.1:9/devtools/browser".to_owned(),
+                trusted_input_limited: false,
+                managed_endpoint_visible: false,
+                process_role: BrowserProcessRole::StandaloneConsumer,
+                managed_discovery_invoked: Arc::new(AtomicBool::new(false)),
+                existing_endpoint_visible: Arc::new(AtomicBool::new(false)),
+                setup_invoked: Arc::new(AtomicBool::new(false)),
+                setup_aborted: setup_aborted.clone(),
+                stall_consent: false,
+                focus: Default::default(),
+            }),
+            Some(Arc::new(DecliningProtectedProvider)),
+        );
+        let refused = BrowserPrepareTool::new(engine)
+            .invoke(json!({
+                "pid": 1,
+                "window_id": 7,
+                "session": SESSION,
+                "strategy": { "kind": "existing_profile" }
+            }))
+            .await;
+        assert_eq!(
+            structured(&refused)["refusal"]["code"],
+            "browser_consent_required",
+            "{}",
+            structured(&refused)
+        );
+        // Checked before yielding: a rollback left to the Drop backstop would
+        // only be spawned, not finished, when the refusal returns.
+        assert!(
+            setup_aborted.load(Ordering::SeqCst),
+            "declined consent must roll back the pending setup before refusing"
+        );
+    })
+    .await;
 }
 
 async fn snapshot(f: &Fixture, target_id: &str, tab_id: &str) -> Value {

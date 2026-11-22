@@ -3,7 +3,7 @@
 
 //! The session's desktop, classified from the environment once. Route
 //! choices read [`desktop`] instead of re-reading `WAYLAND_DISPLAY`, the
-//! native-Wayland opt-in or a compositor's socket variable.
+//! native-Wayland setting or a compositor's socket variable.
 
 use std::ffi::OsString;
 use std::sync::{PoisonError, RwLock};
@@ -12,11 +12,10 @@ use std::sync::{PoisonError, RwLock};
 pub enum Desktop {
     /// No `WAYLAND_DISPLAY`: the X11 routes.
     X11,
-    /// A Wayland session without the native-backend opt-in
-    /// ([`ENABLE_WAYLAND_ENV`]): input takes the X11 routes
-    /// through XWayland.
+    /// A Wayland session with the native backend explicitly disabled by
+    /// [`ENABLE_WAYLAND_ENV`]: input takes X11 routes through XWayland.
     XWayland(Compositor),
-    /// A Wayland session with the native backend opted in.
+    /// A Wayland session using the native backend (the default).
     Wayland(Compositor),
 }
 
@@ -59,8 +58,8 @@ impl Desktop {
     }
 }
 
-/// Name of the opt-in env var that unlocks the experimental native-Wayland
-/// backend.
+/// Native Wayland is enabled by default. Set this variable to 0 or false to
+/// retain the XWayland compatibility backend.
 pub const ENABLE_WAYLAND_ENV: &str = "CUA_DRIVER_RS_ENABLE_WAYLAND";
 
 static DESKTOP: RwLock<Option<Desktop>> = RwLock::new(None);
@@ -79,10 +78,10 @@ pub(crate) fn reclassify() -> Desktop {
     desktop
 }
 
-/// Whether `value` of [`ENABLE_WAYLAND_ENV`] opts in: any
-/// value other than empty, `0` or `false`.
+/// Whether the native backend is enabled: absent means on; empty, `0` and
+/// `false` explicitly select the XWayland compatibility backend.
 pub(crate) fn opted_in(value: Option<&str>) -> bool {
-    value.is_some_and(|value| {
+    value.is_none_or(|value| {
         let value = value.trim();
         !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
     })
@@ -140,8 +139,12 @@ mod tests {
     }
 
     #[test]
-    fn only_the_opt_in_makes_a_wayland_display_native_wayland() {
-        for off in [None, Some(""), Some("0"), Some(" false ")] {
+    fn native_wayland_is_default_and_xwayland_requires_explicit_opt_out() {
+        assert_eq!(
+            classify_env(&[("WAYLAND_DISPLAY", "wayland-0"), ("DISPLAY", ":0")]),
+            Desktop::Wayland(Compositor::Other)
+        );
+        for off in [Some(""), Some("0"), Some(" false ")] {
             let mut vars = vec![("WAYLAND_DISPLAY", "wayland-0"), ("DISPLAY", ":0")];
             vars.extend(off.map(|off| ("CUA_DRIVER_RS_ENABLE_WAYLAND", off)));
             assert_eq!(
@@ -188,7 +191,7 @@ mod tests {
                 ("WAYLAND_DISPLAY", "wayland-0"),
                 ("HYPRLAND_INSTANCE_SIGNATURE", "abc")
             ]),
-            Desktop::XWayland(Compositor::Hyprland)
+            Desktop::Wayland(Compositor::Hyprland)
         );
     }
 }

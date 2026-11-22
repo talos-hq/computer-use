@@ -799,6 +799,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unrestricted_protected_resources_never_request_consent() {
+        let provider = provider(ConsentAction::Decline);
+        let grants =
+            ProtectedResourceGrants::new(Arc::new(ApprovalBroker::new(Some(provider.clone()))));
+        let context = authorization_context(PermissionMode::Unrestricted);
+        for adapter in ENFORCEMENT_ADAPTERS.iter().filter(|adapter| {
+            adapter
+                .profile_behavior
+                .for_mode(PermissionMode::Unrestricted)
+                == ModeBehavior::Allow
+        }) {
+            assert!(
+                grants
+                    .authorize(
+                        &context,
+                        adapter.id,
+                        adapter.risk_class,
+                        Some("unrestricted"),
+                        serde_json::json!({"pid": 42, "window_id": 7}),
+                        "resource",
+                        Duration::from_secs(30),
+                        Duration::from_secs(60),
+                    )
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "{}",
+                adapter.id
+            );
+        }
+        assert_eq!(provider.requests.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn standard_and_unrestricted_routine_actions_skip_the_broker() {
         let provider = provider(ConsentAction::Accept);
         let broker = Arc::new(ApprovalBroker::new(Some(provider.clone())));

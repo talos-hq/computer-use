@@ -383,13 +383,10 @@ impl FramePacer {
 mod portal_video {
     use super::*;
     use crate::wayland::libpipewire::libpipewire;
-    use crate::wayland::portal::RestoreToken;
     use crate::wayland::portal_screencast::{
         run_frame_stream, Frame, FrameFlow, FrameSink, RawFormat, ScreencastSession, StreamOptions,
         CONSENT_TIMEOUT, PORTAL_CALL_TIMEOUT,
     };
-    use ashpd::desktop::screencast::SourceType;
-    use ashpd::enumflags2::BitFlags;
     use std::io::ErrorKind;
     use std::os::fd::AsRawFd;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -430,11 +427,7 @@ mod portal_video {
                 let output_path = output_path.clone();
                 let stop = stop.clone();
                 move || {
-                    let session = ScreencastSession::open(
-                        BitFlags::from(SourceType::Monitor),
-                        Some(RestoreToken::ScreencastVideo),
-                        CONSENT_TIMEOUT,
-                    );
+                    let session = ScreencastSession::open();
                     let session = match session {
                         Ok(session) => session,
                         Err(error) => {
@@ -443,8 +436,7 @@ mod portal_video {
                         }
                     };
                     let result = (|| {
-                        let fd = session.pipewire_fd()?;
-                        let node_id = session.node_id()?;
+                        let (fd, node_id) = session.into_stream();
                         let sink =
                             RawVideoEncoder::new(ffmpeg, output_path, stop, ready_tx.clone());
                         let options = StreamOptions {
@@ -453,7 +445,6 @@ mod portal_video {
                         };
                         run_frame_stream(fd, node_id, options, sink)?.finish()
                     })();
-                    session.close();
                     if let Err(error) = &result {
                         let _ = ready_tx.try_send(Err(error.to_string()));
                     }

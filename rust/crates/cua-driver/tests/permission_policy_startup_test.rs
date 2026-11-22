@@ -168,19 +168,28 @@ fn missing_managed_policy_prevents_daemon_startup() {
 }
 
 #[test]
-fn unrestricted_mode_requires_the_danger_acknowledgement_before_bind() {
-    let directory = tempfile::tempdir().expect("temporary mode test directory");
-    let socket = test_socket(&directory, "unrestricted-no-ack");
-    let output = rejected_serve(&socket, &["--permission-mode", "unrestricted"]);
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("requires --dangerously-bypass-approvals"),
-        "unexpected stderr: {stderr}"
-    );
-    #[cfg(unix)]
-    assert!(!std::path::Path::new(&socket).exists());
+fn default_and_explicit_unrestricted_need_no_danger_acknowledgement() {
+    // EOF makes direct MCP finite and exercises the real startup authorization.
+    for mode in [None, Some("unrestricted")] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_computer-use"));
+        command
+            .args(["mcp", "--direct"])
+            .stdin(Stdio::null())
+            .env_remove("CUA_DRIVER_PERMISSION_MODE")
+            .env_remove("CUA_DRIVER_DANGEROUSLY_BYPASS_APPROVALS")
+            .env_remove("CUA_DRIVER_DISABLE_UNRESTRICTED");
+        if let Some(mode) = mode {
+            command.env("CUA_DRIVER_PERMISSION_MODE", mode);
+        }
+        let output = command
+            .output()
+            .expect("start unrestricted MCP without acknowledgement");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[test]

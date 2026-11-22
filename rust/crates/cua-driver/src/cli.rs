@@ -62,7 +62,7 @@ pub enum Command {
         /// Immutable agent-authorization mode selected at trusted daemon
         /// startup. This is distinct from the macOS OS-permissions gate.
         permission_mode: Option<String>,
-        /// Deliberate unrestricted-mode selector and risk acknowledgement.
+        /// Compatibility selector for unrestricted mode (the default).
         dangerously_bypass_approvals: bool,
         /// Immutable narrow-only capability manifest selected by the trusted
         /// launcher. Required in bounded mode and optional in other profiles.
@@ -699,13 +699,13 @@ pub fn parse_command() -> Command {
         println!();
         println!("agent authorization (serve only):");
         println!("  --no-automation-prompts        Refuse scripting actions without granted macOS Automation consent.");
-        println!("  --permission-mode <mode>        standard (default), bounded, or unrestricted.");
+        println!("  --permission-mode <mode>        unrestricted (default), standard, or bounded.");
         println!(
             "  --grant existing-profile       Pre-authorize existing logged-in Chromium attachment"
         );
         println!("                                  for this runtime. Repeatable for future grant types.");
         println!(
-            "  --dangerously-bypass-approvals  Select unrestricted mode and acknowledge its risk."
+            "  --dangerously-bypass-approvals  Compatibility alias for unrestricted mode (already the default)."
         );
         println!("                                  The mode is fixed for the daemon lifetime and cannot");
         println!("                                  be changed by a tool call.");
@@ -2145,10 +2145,18 @@ pub fn build_manifest() -> serde_json::Value {
         .and_then(|p| p.to_str().map(str::to_owned))
         .unwrap_or_else(|| "cua-driver".to_owned());
 
+    // Linux's target dependency enables these even without CLI feature flags.
+    #[cfg(target_os = "linux")]
+    let portal_features = (
+        platform_linux::wayland::PORTAL_INPUT_ENABLED,
+        platform_linux::wayland::PORTAL_CAPTURE_ENABLED,
+    );
+    #[cfg(not(target_os = "linux"))]
+    let portal_features = (false, false);
     let (wayland_native, portal_input, portal_capture) = manifest_feature_flags(
         cfg!(target_os = "linux"),
-        cfg!(feature = "portal-input"),
-        cfg!(feature = "portal-capture"),
+        portal_features.0,
+        portal_features.1,
     );
 
     serde_json::json!({
@@ -2189,9 +2197,9 @@ pub fn build_manifest() -> serde_json::Value {
               "description": "Run the long-lived daemon — backs the proxy/auto-relaunch path on macOS and the autostart Session 1+ daemon on Windows.",
               "args": [
                   { "name": "--socket", "type": "string", "description": "Override the listen socket path." },
-                  { "name": "--permission-mode", "type": "string", "description": "Immutable daemon authorization mode: standard, bounded, or unrestricted." },
+                  { "name": "--permission-mode", "type": "string", "description": "Immutable daemon authorization mode: unrestricted (default), standard, or bounded." },
                   { "name": "--grant", "type": "repeatable-string", "description": "Pre-authorize a residual standard-mode boundary. Supported value: existing-profile." },
-                  { "name": "--dangerously-bypass-approvals", "type": "flag", "description": "Select unrestricted mode and acknowledge its risk." },
+                  { "name": "--dangerously-bypass-approvals", "type": "flag", "description": "Compatibility alias for unrestricted mode (already the default)." },
                   { "name": "--capability-manifest", "type": "string", "description": "Optional narrow-only tool/resource ceiling; required in bounded mode." },
                   { "name": "--approve-capability-manifest", "type": "flag", "description": "Trusted-launcher confirmation that the exact capability manifest was reviewed." },
                   { "name": "--no-permissions-gate", "type": "flag", "description": "Skip the macOS TCC first-launch gate." },
@@ -4852,7 +4860,7 @@ fn cli_docs_literal() -> serde_json::Value {
                 "options": [
                     {"name":"socket","short_name":null,"help":"Override the daemon socket or named-pipe path.","type":"String","default_value":null,"is_optional":true},
                     {"name":"pid-file","short_name":null,"help":"Override the pid-file path.","type":"Path","default_value":null,"is_optional":true},
-                    {"name":"permission-mode","short_name":null,"help":"Immutable agent authorization mode: standard, bounded, or unrestricted.","type":"String","default_value":"standard","is_optional":true},
+                    {"name":"permission-mode","short_name":null,"help":"Immutable agent authorization mode: unrestricted (default), standard, or bounded.","type":"String","default_value":"unrestricted","is_optional":true},
                     {"name":"grant","short_name":null,"help":"Pre-authorize a residual standard-mode boundary. Repeatable; supported value: existing-profile.","type":"String","default_value":null,"is_optional":true,"is_repeatable":true},
                     {"name":"capability-manifest","short_name":null,"help":"Optional narrow-only tool/resource ceiling; required in bounded mode.","type":"Path","default_value":null,"is_optional":true},
                     {"name":"host-bundle-id","short_name":null,"help":"Advisory host bundle id label echoed in check_permissions output (embedded mode).","type":"String","default_value":null,"is_optional":true},
@@ -4863,7 +4871,7 @@ fn cli_docs_literal() -> serde_json::Value {
                     {"name":"idle-hide-ms","short_name":null,"help":"Override how long an idle agent cursor stays visible, in milliseconds.","type":"Number","default_value":null,"is_optional":true}
                 ],
                 "flags": [
-                    {"name":"dangerously-bypass-approvals","short_name":null,"help":"Select unrestricted mode and acknowledge its risk.","default_value":false},
+                    {"name":"dangerously-bypass-approvals","short_name":null,"help":"Compatibility alias for unrestricted mode (already the default).","default_value":false},
                     {"name":"approve-capability-manifest","short_name":null,"help":"Trusted-launcher confirmation that the exact capability manifest was reviewed.","default_value":false},
                     {"name":"no-permissions-gate","short_name":null,"help":"Skip the macOS first-launch permissions gate.","default_value":false},
                     {"name":"no-automation-prompts","short_name":null,"help":"Refuse scripting actions without granted macOS Automation consent.","default_value":false},
@@ -7142,11 +7150,11 @@ mod tests {
         );
         assert_eq!(
             features.get("portal_input").and_then(|v| v.as_bool()),
-            Some(cfg!(all(target_os = "linux", feature = "portal-input")))
+            Some(cfg!(target_os = "linux"))
         );
         assert_eq!(
             features.get("portal_capture").and_then(|v| v.as_bool()),
-            Some(cfg!(all(target_os = "linux", feature = "portal-capture")))
+            Some(cfg!(target_os = "linux"))
         );
 
         // mcp_invocation — { command: <bin path>, args: ["mcp"] }

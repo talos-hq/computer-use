@@ -42,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref != 'main' && inputs.ref || github.sha }}
+          ref: ${{ (github.event_name == 'push' || (github.ref == 'refs/heads/main' && inputs.ref == 'main')) && github.sha || inputs.ref }}
           persist-credentials: false
       - id: source
         env:
@@ -90,6 +90,7 @@ jobs:
       - uses: forge-ci/setup-soldr@01e9101565638f03588327a3cb7b6ccecfe5a099
         with:
           toolchain-file: rust/rust-toolchain.toml
+          linker: platform-default
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086
         with:
           nix_path: nixpkgs=https://github.com/NixOS/nixpkgs/archive/94c3211b0ee8ba969a3f12eb4aff8ba0f72971dd.tar.gz
@@ -115,6 +116,7 @@ jobs:
       - uses: forge-ci/setup-soldr@01e9101565638f03588327a3cb7b6ccecfe5a099
         with:
           toolchain-file: rust/rust-toolchain.toml
+          linker: platform-default
       - name: Install the Windows resource compiler
         run: |
           sudo apt-get update
@@ -150,6 +152,7 @@ jobs:
       - uses: forge-ci/setup-soldr@01e9101565638f03588327a3cb7b6ccecfe5a099
         with:
           toolchain-file: rust/rust-toolchain.toml
+          linker: platform-default
       - name: Build with the runner's Swift SDK
         working-directory: rust
         env:
@@ -332,13 +335,17 @@ jobs:
           sha256sum -c "$name.tar.gz.sha256"
           tar -xzf "$name.tar.gz"
           cd "$name"
-          [[ $(./computer-use --version) == "$(./cua-driver --version)" ]]
+          main=$(./computer-use --version)
+          alias=$(./cua-driver --version)
+          [[ "$main" == "computer-use $VERSION" && "$alias" == "cua-driver $VERSION" ]]
           ./computer-use doctor
           ./computer-use install-links --dir "$RUNNER_TEMP/bin"
-          [[ $("$RUNNER_TEMP/bin/cua-driver" --version) == "$(./computer-use --version)" ]]
+          installed=$("$RUNNER_TEMP/bin/cua-driver" --version)
+          [[ "$installed" == "$alias" ]]
       - uses: forge-ci/setup-soldr@01e9101565638f03588327a3cb7b6ccecfe5a099
         with:
           toolchain-file: rust/rust-toolchain.toml
+          linker: platform-default
       - name: Install native test dependencies
         run: |
           sudo apt-get update
@@ -392,9 +399,9 @@ jobs:
               }
           }
           $main = ./computer-use.exe --version
-          if ($LASTEXITCODE) { throw 'computer-use exited unsuccessfully' }
+          if ($LASTEXITCODE -or $main -ne "computer-use $env:VERSION") { throw 'Unexpected computer-use version' }
           $compat = ./cua-driver.exe --version
-          if ($LASTEXITCODE -or $main -ne $compat) { throw 'Compatibility version differs' }
+          if ($LASTEXITCODE -or $compat -ne "cua-driver $env:VERSION") { throw 'Unexpected compatibility version' }
           Write-Host $main
           ./computer-use.exe doctor
           if ($LASTEXITCODE) { throw 'doctor exited unsuccessfully' }
@@ -431,7 +438,9 @@ jobs:
             tar -xzf "computer-use-$VERSION-darwin-$variant.tar.gz" -C "$variant"
             app="$variant/ComputerUse.app"
             main="$app/Contents/MacOS/computer-use"
-            [[ $("$main" --version) == "$("$app/Contents/MacOS/cua-driver" --version)" ]]
+            version=$("$main" --version)
+            alias=$("$app/Contents/MacOS/cua-driver" --version)
+            [[ "$version" == "computer-use $VERSION" && "$alias" == "cua-driver $VERSION" ]]
             if [[ "$SIGNED" == true ]]; then
               codesign --verify --deep --strict --verbose=2 "$app"
               codesign -dvv "$app" 2>&1 | grep -Fx 'TeamIdentifier=NCFFSNX26D'
@@ -452,6 +461,7 @@ jobs:
       - uses: forge-ci/setup-soldr@01e9101565638f03588327a3cb7b6ccecfe5a099
         with:
           toolchain-file: rust/rust-toolchain.toml
+          linker: platform-default
       - name: Run macOS unit tests
         working-directory: rust
         run: soldr cargo test --locked -p platform-macos --lib

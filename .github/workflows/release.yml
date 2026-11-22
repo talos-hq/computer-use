@@ -19,6 +19,13 @@ on:
         description: Mark a manually published release as a prerelease
         default: true
         type: boolean
+      wheel-release:
+        description: Build wheels from an existing signed release version without rebuilding it
+        type: string
+      publish-wheels:
+        description: Publish the wheels for wheel-release to PyPI from main
+        type: boolean
+        default: false
   push:
     tags: ['computer-use-v*']
 
@@ -34,6 +41,7 @@ defaults:
 
 jobs:
   source:
+    if: inputs.wheel-release == ''
     runs-on: ubuntu-24.04
     outputs:
       sha: ${{ steps.source.outputs.sha }}
@@ -564,3 +572,54 @@ jobs:
           if [[ "$PRERELEASE" == true ]]; then args+=(--prerelease); fi
           if [[ "$GITHUB_EVENT_NAME" == push ]]; then args+=(--verify-tag); fi
           gh release create "computer-use-v$VERSION" "${args[@]}" "${archives[@]}" SHA256SUMS
+
+  build-wheels:
+    needs: [source, publish]
+    if: >-
+      !cancelled() &&
+      (needs.publish.result == 'success' ||
+       (github.event_name == 'workflow_dispatch' && inputs.wheel-release != ''))
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build wheels from published archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.wheel-release || needs.source.outputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release download "computer-use-v$VERSION" --dir wheel-inputs \
+            --pattern 'computer-use-*-linux-*.tar.gz' \
+            --pattern 'computer-use-*-darwin-universal.tar.gz' \
+            --pattern 'computer-use-*-windows-*.zip' --pattern SHA256SUMS
+          python3 python/clud-computer-use/build_wheels.py "$VERSION" wheel-inputs wheels
+          python3 -m venv wheel-smoke
+          wheel-smoke/bin/pip install --no-index wheels/*manylinux_2_17_x86_64.whl
+          test "$(wheel-smoke/bin/clud-computer-use --version)" = "computer-use $VERSION"
+          cmp "$(wheel-smoke/bin/clud-computer-use-archive)" \
+            "wheel-inputs/computer-use-$VERSION-linux-x86_64.tar.gz"
+          wheel-smoke/bin/clud-computer-use doctor
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: clud-computer-use-wheels
+          path: wheels/*.whl
+          if-no-files-found: error
+
+  publish-wheels:
+    needs: build-wheels
+    if: >-
+      github.event_name == 'push' ||
+      (github.ref == 'refs/heads/main' && inputs.publish-wheels)
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: clud-computer-use-wheels
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@106e0b0b7c337fa67ed433972f777c6357f78598 # v1.13.0

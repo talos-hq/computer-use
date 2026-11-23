@@ -84,6 +84,6 @@ uv tool run --from clud-computer-use==0.57.2 computer-use doctor
 
 The release workflow verifies the archived payloads against the published
 `SHA256SUMS` before building wheels. To build wheels for an existing release,
-dispatch `release.yml` with `wheel-release` set to its version. To publish from
+dispatch `auto-release.yml` with `wheel-release` set to its version. To publish from
 `main`, also set `publish-wheels`. PyPI Trusted Publishing uses repository
-`talos-hq/computer-use`, workflow `release.yml` and environment `pypi`.
+`talos-hq/computer-use`, workflow `auto-release.yml` and environment `pypi`.
